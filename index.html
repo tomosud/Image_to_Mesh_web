@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image to Mesh — World Position Viewer</title>
+    <link rel="icon" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3e%3cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3e%3c/svg%3e">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+        <div id="captureFrame"></div>
+
+        <div id="dropZone">
+            <div id="dropText">画像をドロップ</div>
+            <div id="dropSubtext">
+                JPG / PNG 画像をドロップすると<br>
+                デプス推定 → ワールドポジション化 → メッシュ表示します<br>
+                <span style="opacity:.8">(クリックでファイル選択も可)</span>
+            </div>
+        </div>
+
+        <!-- 右上: ビューア表示コントロール -->
+        <div id="controls">
+            <div class="control-panel">
+                <div class="control-group">
+                    <label class="chk">
+                        <input type="checkbox" id="pointsMode">
+                        頂点のみ表示
+                    </label>
+                    <label class="chk">
+                        <input type="checkbox" id="disableLighting" checked>
+                        ライティングなし
+                    </label>
+                    <label class="chk">
+                        <input type="checkbox" id="disableColor">
+                        カラーなし
+                    </label>
+                </div>
+                <div class="control-group" id="pointSizeControl" style="display: none;">
+                    <label>点のサイズ (px)</label>
+                    <div class="slider-container">
+                        <input type="range" id="pointSize" min="1" max="30" step="0.5" value="2">
+                        <span class="slider-value" id="pointSizeValue">2.0</span>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <button id="resetView">視点リセット</button>
+                    <button id="toggleWireframe">ワイヤーフレーム</button>
+                </div>
+                <div class="control-group">
+                    <label class="chk">
+                        <input type="checkbox" id="showCaptureFrame">
+                        キャプチャ範囲表示
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右下: 推論パラメータ + ダウンロード -->
+        <div id="sidePanel">
+            <div class="control-panel">
+                <div class="control-group">
+                    <label>視野角 FOV: <span id="fovValue">60</span>°</label>
+                    <div class="slider-container">
+                        <input type="range" id="fov" min="20" max="120" step="1" value="60">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>スケール: <span id="scaleValue">1.0</span></label>
+                    <div class="slider-container">
+                        <input type="range" id="scale" min="0.1" max="10" step="0.1" value="1">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="chk">
+                        <input type="checkbox" id="metricScale" checked>
+                        焦点メトリックスケール (focal/300)
+                    </label>
+                </div>
+                <div class="control-group">
+                    <button id="recompute" disabled>再計算</button>
+                    <button id="loadAnother">別の画像</button>
+                </div>
+                <div class="control-group dl-group">
+                    <div class="dl-title">ダウンロード</div>
+                    <button id="dlImage" disabled>元画像</button>
+                    <button id="dlDepth" disabled>Depth (EXR)</button>
+                    <button id="dlWorldPos" disabled>WorldPos (EXR)</button>
+                    <button id="exportOBJ" disabled>OBJ</button>
+                    <button id="exportPNG" disabled>PNG (2048)</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="loadingOverlay">
+            <div class="loader">
+                <div class="spinner"></div>
+                <div id="loadingText">読み込み中...</div>
+                <div id="loadingProgress" class="progress" style="display:none;">
+                    <div id="loadingBar" class="progress-bar"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="info">
+            <div>左ドラッグ: 回転</div>
+            <div>ホイール: ズーム</div>
+            <div>右ドラッグ: パン</div>
+        </div>
+
+        <div id="meshInfo">
+            <div class="info-panel">
+                <div><span class="info-label">解像度:</span> <span id="meshResolution">--</span></div>
+                <div><span class="info-label">範囲 X:</span> <span id="rangeX">--</span></div>
+                <div><span class="info-label">範囲 Y:</span> <span id="rangeY">--</span></div>
+                <div><span class="info-label">範囲 Z:</span> <span id="rangeZ">--</span></div>
+            </div>
+        </div>
+
+        <input type="file" id="fileInput" accept=".jpg,.jpeg,.png" />
+    </div>
+
+    <!-- Three.js and dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <!-- onnxruntime-web -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+
+    <!-- App modules -->
+    <script src="js/exr.js"></script>
+    <script src="js/worldpos.js"></script>
+    <script src="js/viewer.js"></script>
+    <script src="js/inference.js"></script>
+    <script src="js/download.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

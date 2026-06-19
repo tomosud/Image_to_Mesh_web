@@ -1,0 +1,296 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #000000;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+#dropZone {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 480px;
+    height: 240px;
+    border: 3px dashed #ffffff;
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    z-index: 1000;
+}
+
+#dropZone:hover,
+#dropZone.dragover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: #4CAF50;
+    transform: translate(-50%, -50%) scale(1.05);
+}
+
+#dropZone.hidden {
+    display: none;
+}
+
+#dropText {
+    color: white;
+    font-size: 22px;
+    margin-bottom: 12px;
+    text-align: center;
+    font-weight: bold;
+}
+
+#dropSubtext {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    text-align: center;
+    line-height: 1.7;
+}
+
+#controls {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: none;
+}
+
+#sidePanel {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: none;
+}
+
+.control-panel {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 15px;
+    border-radius: 10px;
+    color: white;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    min-width: 230px;
+}
+
+.control-group {
+    margin-bottom: 15px;
+}
+
+.control-group:last-child {
+    margin-bottom: 0;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 14px;
+}
+
+label.chk {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+
+label.chk input {
+    margin-right: 8px;
+    cursor: pointer;
+}
+
+.slider-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+input[type="range"] {
+    flex: 1;
+    min-width: 150px;
+}
+
+.slider-value {
+    min-width: 45px;
+    text-align: right;
+    font-size: 13px;
+}
+
+button {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 8px 16px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s ease;
+    margin-right: 5px;
+    margin-bottom: 5px;
+}
+
+button:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+button:disabled {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+input[type="checkbox"]:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.dl-group {
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+    padding-top: 12px;
+}
+
+.dl-title {
+    font-size: 13px;
+    font-weight: bold;
+    opacity: 0.9;
+    margin-bottom: 8px;
+}
+
+#loadingOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+}
+
+.loader {
+    color: white;
+    text-align: center;
+}
+
+.spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    width: 60px;
+    height: 60px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.progress {
+    width: 260px;
+    height: 10px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 5px;
+    overflow: hidden;
+    margin: 15px auto 0;
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background: #667eea;
+    transition: width 0.2s ease;
+}
+
+#canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#captureFrame {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    height: 100%;
+    aspect-ratio: 1 / 1;
+    border: 2px dashed rgba(102, 126, 234, 0.5);
+    pointer-events: none;
+    z-index: 500;
+    display: none;
+}
+
+#captureFrame.visible {
+    display: block;
+}
+
+#fileInput {
+    display: none;
+}
+
+#info {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    color: white;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    display: none;
+    line-height: 1.8;
+}
+
+#meshInfo {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 1000;
+    display: none;
+}
+
+.info-panel {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 15px;
+    border-radius: 10px;
+    color: white;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    font-size: 14px;
+    min-width: 220px;
+}
+
+.info-panel div {
+    margin-bottom: 8px;
+}
+
+.info-panel div:last-child {
+    margin-bottom: 0;
+}
+
+.info-label {
+    color: #ffffff;
+    font-weight: bold;
+    opacity: 0.9;
+}
