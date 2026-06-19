@@ -10,6 +10,7 @@
     let currentBaseName = 'mesh';
     let modelReady = false;
     let lastNumTokens = 1800;
+    let currentModelKey = 'vitb';
 
     const $ = (id) => document.getElementById(id);
 
@@ -207,12 +208,17 @@
         });
 
         // 推論パラメータ
+        $('modelSelect').addEventListener('change', (e) => {
+            currentModelKey = e.target.value;
+            Inference.setModel(currentModelKey);
+            modelReady = false; // 次回処理時に再ロード
+        });
         $('numTokens').addEventListener('input', (e) => { $('numTokensValue').textContent = e.target.value; });
         $('scale').addEventListener('input', (e) => { $('scaleValue').textContent = parseFloat(e.target.value).toFixed(1); });
         $('applyMask').addEventListener('change', recompute);
         $('recompute').addEventListener('click', () => {
-            // num_tokens が変わっていれば再推論、そうでなければ後処理のみ
-            if (getNumTokens() !== lastNumTokens && currentImageData) {
+            // モデル変更 or num_tokens が変わっていれば再推論、そうでなければ後処理のみ
+            if ((!modelReady || getNumTokens() !== lastNumTokens) && currentImageData) {
                 processImage(currentFile);
             } else {
                 recompute();

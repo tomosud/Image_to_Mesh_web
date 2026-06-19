@@ -18,51 +18,91 @@ const MogePost = (function () {
         return { aspect, sq, spanX, spanY };
     }
 
-    // focal/shift を線形最小二乗で復元（legacy 版）。
-    // mask があれば有効画素のみ使用。
+    // focal/shift を復元（MoGe-2 と同じ非線形 solve_optimal_focal_shift 相当）。
+    //   min_{shift,focal} | focal * xy / (z + shift) - uv |
+    // focal は shift が決まれば閉形式: focal = Σ(xy_proj·uv) / Σ|xy_proj|²
+    // shift は 1 次元なので、粗グリッド探索 + 黄金分割で最小化する。
+    // 高速化のため ~64x64 にダウンサンプリング。mask があれば有効画素のみ。
     function recoverFocalShift(points, W, H, maskBin) {
         const { spanX, spanY } = makeUV(W, H);
 
-        let M00 = 0, M01 = 0, M11 = 0, c0 = 0, c1 = 0;
-        let count = 0;
+        const us = [], vs = [], xs = [], ys = [], zs = [];
+        const strideX = Math.max(1, Math.floor(W / 64));
+        const strideY = Math.max(1, Math.floor(H / 64));
+        let zmin = Infinity, zmax = -Infinity;
 
-        for (let y = 0; y < H; y++) {
+        for (let y = 0; y < H; y += strideY) {
             const v = spanY * (2 * y - (H - 1)) / H;
-            for (let x = 0; x < W; x++) {
+            for (let x = 0; x < W; x += strideX) {
                 const idx = y * W + x;
                 if (maskBin && maskBin[idx] === 0) continue;
                 const pi = idx * 3;
-                const px = points[pi];
-                const py = points[pi + 1];
-                const pz = points[pi + 2];
+                const px = points[pi], py = points[pi + 1], pz = points[pi + 2];
                 const u = spanX * (2 * x - (W - 1)) / W;
-
-                const dotXY = px * u + py * v;        // xy·uv
-                const uu = u * u + v * v;             // |uv|²
-                M00 += px * px + py * py;
-                M01 += -dotXY;
-                M11 += uu;
-                c0 += pz * dotXY;
-                c1 += -pz * uu;
-                count++;
+                us.push(u); vs.push(v); xs.push(px); ys.push(py); zs.push(pz);
+                if (pz < zmin) zmin = pz;
+                if (pz > zmax) zmax = pz;
             }
         }
 
+        let n = zs.length;
         // 有効画素が少なすぎる場合は全画素で再計算
-        if (count < 16 && maskBin) {
-            return recoverFocalShift(points, W, H, null);
+        if (n < 2 && maskBin) return recoverFocalShift(points, W, H, null);
+        if (n < 2) return { focal: 1.0, shift: 0.0 };
+
+        // 与えられた shift に対する最適 focal と残差二乗和
+        function evalShift(shift) {
+            let num = 0, den = 0;
+            for (let i = 0; i < n; i++) {
+                const inv = 1 / (zs[i] + shift);
+                const xp = xs[i] * inv, yp = ys[i] * inv;
+                num += xp * us[i] + yp * vs[i];
+                den += xp * xp + yp * yp;
+            }
+            const f = den > 1e-12 ? num / den : 1.0;
+            let res = 0;
+            for (let i = 0; i < n; i++) {
+                const inv = 1 / (zs[i] + shift);
+                const ex = f * xs[i] * inv - us[i];
+                const ey = f * ys[i] * inv - vs[i];
+                res += ex * ex + ey * ey;
+            }
+            return { f, res };
         }
 
-        const e = 1e-6;
-        const a = M00 + e, d = M11 + e, b = M01;
-        const det = a * d - b * b;
-        let focal, shift;
-        if (Math.abs(det) < 1e-12) {
-            focal = 1.0; shift = 0.0;
-        } else {
-            focal = (d * c0 - b * c1) / det;
-            shift = (-b * c0 + a * c1) / det;
+        // shift の探索範囲: z + shift > 0 を満たす範囲。中心 0 付近。
+        const span = Math.max(zmax - zmin, Math.abs(zmax), 1e-3);
+        const lo = -zmin + 1e-4;        // 下限（最小 z でも正を保つ）
+        const hi = lo + 2 * span;       // 上限
+
+        // 粗グリッド探索で最小付近を特定
+        const GRID = 64;
+        let bestS = lo, bestRes = Infinity;
+        for (let i = 0; i <= GRID; i++) {
+            const s = lo + (hi - lo) * (i / GRID);
+            const r = evalShift(s).res;
+            if (r < bestRes) { bestRes = r; bestS = s; }
         }
+
+        // 黄金分割で精緻化
+        let a = Math.max(lo, bestS - (hi - lo) / GRID);
+        let b = Math.min(hi, bestS + (hi - lo) / GRID);
+        const gr = (Math.sqrt(5) - 1) / 2;
+        let c = b - gr * (b - a);
+        let d = a + gr * (b - a);
+        let fc = evalShift(c).res;
+        let fd = evalShift(d).res;
+        for (let it = 0; it < 60 && (b - a) > 1e-7; it++) {
+            if (fc < fd) {
+                b = d; d = c; fd = fc;
+                c = b - gr * (b - a); fc = evalShift(c).res;
+            } else {
+                a = c; c = d; fc = fd;
+                d = a + gr * (b - a); fd = evalShift(d).res;
+            }
+        }
+        const shift = (a + b) / 2;
+        let focal = evalShift(shift).f;
         if (!(focal > 1e-6)) focal = 1e-3;
         return { focal, shift };
     }
@@ -125,6 +165,24 @@ const MogePost = (function () {
                 depth[idx] = z;
             }
         }
+
+        // 確認用デバッグログ（厚み/スケール診断）
+        let zMin = Infinity, zMax = -Infinity, valid = 0;
+        for (let i = 0; i < W * H; i++) {
+            if (maskBin[i] === 0) continue;
+            const z = depth[i];
+            if (z < zMin) zMin = z;
+            if (z > zMax) zMax = z;
+            valid++;
+        }
+        console.log('[MogePost]', {
+            focal: focal.toFixed(4), shift: shift.toFixed(4),
+            fx: fx.toFixed(3), fy: fy.toFixed(3),
+            metricScale: metricScale.toFixed(4),
+            depthMin: zMin.toFixed(4), depthMax: zMax.toFixed(4),
+            depthRange: (zMax - zMin).toFixed(4),
+            validPx: valid, size: `${W}x${H}`
+        });
 
         return {
             points: outPoints,

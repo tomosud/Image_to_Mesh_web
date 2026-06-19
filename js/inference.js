@@ -3,19 +3,52 @@
 // 後処理(focal/shift復元・再投影・metric適用)は moge_post.js で実施する。
 
 const Inference = (function () {
-    const MODEL_URL = 'https://huggingface.co/Ruicheng/moge-2-vitl-normal-onnx/resolve/main/model.onnx';
-    const CACHE_NAME = 'moge2-onnx-cache-v1';
+    // 利用可能なモデル（FP32, 動的形状, 可変トークン）
+    // ViT-L は約1.32GB でブラウザの WASM ヒープに載らず確保失敗するため、
+    // 既定はブラウザで動作する ViT-B。WebGPU 環境では ViT-L も選択可。
+    const MODELS = {
+        vits: {
+            label: 'ViT-S（最小・最速 / 約150MB）',
+            url: 'https://huggingface.co/Ruicheng/moge-2-vits-normal-onnx/resolve/main/model.onnx',
+            cache: 'moge2-vits-onnx-cache-v1'
+        },
+        vitb: {
+            label: 'ViT-B（標準 / 約400MB）',
+            url: 'https://huggingface.co/Ruicheng/moge-2-vitb-normal-onnx/resolve/main/model.onnx',
+            cache: 'moge2-vitb-onnx-cache-v1'
+        },
+        vitl: {
+            label: 'ViT-L（高精度 / 約1.32GB・WebGPU必須）',
+            url: 'https://huggingface.co/Ruicheng/moge-2-vitl-normal-onnx/resolve/main/model.onnx',
+            cache: 'moge2-vitl-onnx-cache-v1'
+        }
+    };
+    let currentModelKey = 'vitb';
+
     const PATCH = 14; // DINOv2 patch size
     const MEAN = [0.485, 0.456, 0.406];
     const STD = [0.229, 0.224, 0.225];
 
     let session = null;
     let hasNumTokensInput = false;
+    let loadedModelKey = null;
 
-    let session = null;
+    function setModel(key) {
+        if (!MODELS[key]) return;
+        if (key !== currentModelKey) {
+            // モデル変更時は既存セッションを破棄して再ロードを促す
+            if (session) { try { session.release && session.release(); } catch (e) { } }
+            session = null;
+            loadedModelKey = null;
+        }
+        currentModelKey = key;
+    }
 
     // モデルバイトを Cache から取得、無ければ fetch + 進捗 + 保存
     async function fetchModelBytes(onProgress) {
+        const model = MODELS[currentModelKey];
+        const MODEL_URL = model.url;
+        const CACHE_NAME = model.cache;
         let cache = null;
         try {
             cache = await caches.open(CACHE_NAME);
@@ -58,7 +91,7 @@ const Inference = (function () {
     }
 
     async function loadModel(onProgress) {
-        if (session) return session;
+        if (session && loadedModelKey === currentModelKey) return session;
 
         // ort wasm の取得元（CDN）
         if (typeof ort !== 'undefined' && ort.env && ort.env.wasm) {
@@ -81,7 +114,8 @@ const Inference = (function () {
                     graphOptimizationLevel: 'all'
                 });
                 hasNumTokensInput = session.inputNames.includes('num_tokens');
-                console.log('MoGe ONNX session created with EP:', eps[0], 'inputs:', session.inputNames, 'outputs:', session.outputNames);
+                loadedModelKey = currentModelKey;
+                console.log('MoGe ONNX session created with EP:', eps[0], 'model:', currentModelKey, 'inputs:', session.inputNames, 'outputs:', session.outputNames);
                 return session;
             } catch (e) {
                 console.warn(`EP ${eps[0]} 失敗:`, e);
@@ -170,5 +204,5 @@ const Inference = (function () {
         };
     }
 
-    return { loadModel, run, preprocess, computeInputSize, MODEL_URL };
+    return { loadModel, run, preprocess, computeInputSize, setModel, MODELS };
 })();

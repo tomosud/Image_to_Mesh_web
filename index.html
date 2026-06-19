@@ -62,6 +62,14 @@
         <div id="sidePanel">
             <div class="control-panel">
                 <div class="control-group">
+                    <label>モデル</label>
+                    <select id="modelSelect">
+                        <option value="vits">ViT-S（最小・最速 / 約150MB）</option>
+                        <option value="vitb" selected>ViT-B（標準 / 約400MB）</option>
+                        <option value="vitl">ViT-L（高精度 / 約1.32GB・WebGPU必須）</option>
+                    </select>
+                </div>
+                <div class="control-group">
                     <label>精度 (num_tokens): <span id="numTokensValue">1800</span></label>
                     <div class="slider-container">
                         <input type="range" id="numTokens" min="1200" max="2500" step="100" value="1800">
