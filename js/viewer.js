@@ -87,14 +87,11 @@ const Viewer = (function () {
         if (!currentWorldPosData) return;
         const { data: worldPosData, width, height } = currentWorldPosData;
 
-        let meshWidth, meshHeight;
-        if (currentColorTexture) {
-            meshWidth = Math.min(currentColorTexture.width, 4096);
-            meshHeight = Math.min(currentColorTexture.height, 4096);
-        } else {
-            meshWidth = Math.min(width, 4096);
-            meshHeight = Math.min(height, 4096);
-        }
+        // Geometry cannot contain more detail than the inferred point map.
+        // Using the source image resolution only creates millions of interpolated
+        // vertices and makes discontinuity artifacts worse.
+        const meshWidth = Math.min(width, 2048);
+        const meshHeight = Math.min(height, 2048);
 
         const geometry = new THREE.PlaneGeometry(1, 1, meshWidth - 1, meshHeight - 1);
         const positions = geometry.attributes.position.array;
@@ -133,6 +130,7 @@ const Viewer = (function () {
         }
 
         geometry.attributes.position.needsUpdate = true;
+        removeInvalidAndDiscontinuousFaces(geometry, positions);
         geometry.computeVertexNormals();
 
         // 頂点カラー（ポイントモード等で使用）
@@ -173,6 +171,33 @@ const Viewer = (function () {
         updateMeshInfo(meshWidth, meshHeight, bounds);
 
         if (!skipCameraReset) resetCamera();
+    }
+
+    // Do not connect masked pixels or surfaces separated by a large depth jump.
+    // A regular image-grid mesh otherwise produces long sheets at silhouettes.
+    function removeInvalidAndDiscontinuousFaces(geometry, positions) {
+        if (!geometry.index) return;
+        const source = geometry.index.array;
+        const kept = [];
+        const relativeDepthThreshold = 0.10;
+
+        for (let i = 0; i < source.length; i += 3) {
+            const a = source[i], b = source[i + 1], c = source[i + 2];
+            const ai = a * 3, bi = b * 3, ci = c * 3;
+            const az = positions[ai + 2], bz = positions[bi + 2], cz = positions[ci + 2];
+            if (!Number.isFinite(positions[ai]) || !Number.isFinite(positions[ai + 1]) || !Number.isFinite(az) ||
+                !Number.isFinite(positions[bi]) || !Number.isFinite(positions[bi + 1]) || !Number.isFinite(bz) ||
+                !Number.isFinite(positions[ci]) || !Number.isFinite(positions[ci + 1]) || !Number.isFinite(cz)) {
+                continue;
+            }
+
+            const minDepth = Math.min(Math.abs(az), Math.abs(bz), Math.abs(cz));
+            const depthJump = Math.max(az, bz, cz) - Math.min(az, bz, cz);
+            if (depthJump > relativeDepthThreshold * Math.max(minDepth, 1e-6)) continue;
+            kept.push(a, b, c);
+        }
+
+        geometry.setIndex(kept);
     }
 
     function getTextureObject() {

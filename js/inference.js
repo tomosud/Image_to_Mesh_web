@@ -26,9 +26,6 @@ const Inference = (function () {
     let currentModelKey = 'vitb';
 
     const PATCH = 14; // DINOv2 patch size
-    const MEAN = [0.485, 0.456, 0.406];
-    const STD = [0.229, 0.224, 0.225];
-
     let session = null;
     let hasNumTokensInput = false;
     let loadedModelKey = null;
@@ -145,9 +142,11 @@ const Inference = (function () {
             const r = resized[i * 4] / 255;
             const g = resized[i * 4 + 1] / 255;
             const b = resized[i * 4 + 2] / 255;
-            out[i] = (r - MEAN[0]) / STD[0];                 // R plane
-            out[planeSize + i] = (g - MEAN[1]) / STD[1];     // G plane
-            out[planeSize * 2 + i] = (b - MEAN[2]) / STD[2]; // B plane
+            // MoGe's DINOv2 encoder performs ImageNet normalization inside
+            // the ONNX graph. The external input must remain RGB in [0, 1].
+            out[i] = r;                 // R plane
+            out[planeSize + i] = g;     // G plane
+            out[planeSize * 2 + i] = b; // B plane
         }
         return out;
     }

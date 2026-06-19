@@ -18,30 +18,31 @@ const MogePost = (function () {
         return { aspect, sq, spanX, spanY };
     }
 
-    // focal/shift を復元（MoGe-2 と同じ非線形 solve_optimal_focal_shift 相当）。
+    // focal/shift を復元（MoGe-2 の solve_optimal_focal_shift 相当）。
     //   min_{shift,focal} | focal * xy / (z + shift) - uv |
     // focal は shift が決まれば閉形式: focal = Σ(xy_proj·uv) / Σ|xy_proj|²
-    // shift は 1 次元なので、粗グリッド探索 + 黄金分割で最小化する。
-    // 高速化のため ~64x64 にダウンサンプリング。mask があれば有効画素のみ。
+    // 公式実装と同じく shift=0 から LM 法で最小化する。shift を正の
+    // depth 範囲に事前制約すると外れ値に引っ張られるため、制約しない。
+    // 高速化のため最大 64x64 点を均等サンプリングする。
     function recoverFocalShift(points, W, H, maskBin) {
         const { spanX, spanY } = makeUV(W, H);
 
         const us = [], vs = [], xs = [], ys = [], zs = [];
-        const strideX = Math.max(1, Math.floor(W / 64));
-        const strideY = Math.max(1, Math.floor(H / 64));
-        let zmin = Infinity, zmax = -Infinity;
+        const sampleW = Math.min(64, W);
+        const sampleH = Math.min(64, H);
 
-        for (let y = 0; y < H; y += strideY) {
+        for (let sy = 0; sy < sampleH; sy++) {
+            const y = Math.min(H - 1, Math.round((sy + 0.5) * H / sampleH - 0.5));
             const v = spanY * (2 * y - (H - 1)) / H;
-            for (let x = 0; x < W; x += strideX) {
+            for (let sx = 0; sx < sampleW; sx++) {
+                const x = Math.min(W - 1, Math.round((sx + 0.5) * W / sampleW - 0.5));
                 const idx = y * W + x;
                 if (maskBin && maskBin[idx] === 0) continue;
                 const pi = idx * 3;
                 const px = points[pi], py = points[pi + 1], pz = points[pi + 2];
+                if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
                 const u = spanX * (2 * x - (W - 1)) / W;
                 us.push(u); vs.push(v); xs.push(px); ys.push(py); zs.push(pz);
-                if (pz < zmin) zmin = pz;
-                if (pz > zmax) zmax = pz;
             }
         }
 
@@ -51,58 +52,67 @@ const MogePost = (function () {
         if (n < 2) return { focal: 1.0, shift: 0.0 };
 
         // 与えられた shift に対する最適 focal と残差二乗和
-        function evalShift(shift) {
+        function evalShift(shift, keepResiduals) {
             let num = 0, den = 0;
             for (let i = 0; i < n; i++) {
-                const inv = 1 / (zs[i] + shift);
+                let d = zs[i] + shift;
+                if (Math.abs(d) < 1e-7) d = d < 0 ? -1e-7 : 1e-7;
+                const inv = 1 / d;
                 const xp = xs[i] * inv, yp = ys[i] * inv;
                 num += xp * us[i] + yp * vs[i];
                 den += xp * xp + yp * yp;
             }
             const f = den > 1e-12 ? num / den : 1.0;
             let res = 0;
+            const residuals = keepResiduals ? new Float64Array(n * 2) : null;
             for (let i = 0; i < n; i++) {
-                const inv = 1 / (zs[i] + shift);
+                let d = zs[i] + shift;
+                if (Math.abs(d) < 1e-7) d = d < 0 ? -1e-7 : 1e-7;
+                const inv = 1 / d;
                 const ex = f * xs[i] * inv - us[i];
                 const ey = f * ys[i] * inv - vs[i];
                 res += ex * ex + ey * ey;
+                if (residuals) {
+                    residuals[i * 2] = ex;
+                    residuals[i * 2 + 1] = ey;
+                }
             }
-            return { f, res };
+            return { f, res, residuals };
         }
 
-        // shift の探索範囲: z + shift > 0 を満たす範囲。中心 0 付近。
-        const span = Math.max(zmax - zmin, Math.abs(zmax), 1e-3);
-        const lo = -zmin + 1e-4;        // 下限（最小 z でも正を保つ）
-        const hi = lo + 2 * span;       // 上限
+        // 1変数 Levenberg-Marquardt。数値微分には focal の再最適化も含む。
+        let shift = 0.0;
+        let lambda = 1e-3;
+        let current = evalShift(shift, true);
+        const zScale = Math.max(1e-3, Math.sqrt(zs.reduce((s, z) => s + z * z, 0) / n));
 
-        // 粗グリッド探索で最小付近を特定
-        const GRID = 64;
-        let bestS = lo, bestRes = Infinity;
-        for (let i = 0; i <= GRID; i++) {
-            const s = lo + (hi - lo) * (i / GRID);
-            const r = evalShift(s).res;
-            if (r < bestRes) { bestRes = r; bestS = s; }
-        }
+        for (let it = 0; it < 50; it++) {
+            const h = 1e-4 * Math.max(zScale, Math.abs(shift), 1e-3);
+            const plus = evalShift(shift + h, true).residuals;
+            const minus = evalShift(shift - h, true).residuals;
+            let jtj = 0, jtr = 0;
+            for (let i = 0; i < current.residuals.length; i++) {
+                const jac = (plus[i] - minus[i]) / (2 * h);
+                jtj += jac * jac;
+                jtr += jac * current.residuals[i];
+            }
+            if (!(jtj > 1e-12)) break;
 
-        // 黄金分割で精緻化
-        let a = Math.max(lo, bestS - (hi - lo) / GRID);
-        let b = Math.min(hi, bestS + (hi - lo) / GRID);
-        const gr = (Math.sqrt(5) - 1) / 2;
-        let c = b - gr * (b - a);
-        let d = a + gr * (b - a);
-        let fc = evalShift(c).res;
-        let fd = evalShift(d).res;
-        for (let it = 0; it < 60 && (b - a) > 1e-7; it++) {
-            if (fc < fd) {
-                b = d; d = c; fd = fc;
-                c = b - gr * (b - a); fc = evalShift(c).res;
+            const delta = -jtr / (jtj + lambda * Math.max(jtj, 1));
+            if (!Number.isFinite(delta)) break;
+            const candidateShift = shift + delta;
+            const candidate = evalShift(candidateShift, true);
+            if (Number.isFinite(candidate.res) && candidate.res < current.res) {
+                shift = candidateShift;
+                current = candidate;
+                lambda = Math.max(1e-9, lambda * 0.3);
+                if (Math.abs(delta) < 1e-6 * Math.max(1, Math.abs(shift))) break;
             } else {
-                a = c; c = d; fc = fd;
-                d = a + gr * (b - a); fd = evalShift(d).res;
+                lambda = Math.min(1e9, lambda * 10);
             }
         }
-        const shift = (a + b) / 2;
-        let focal = evalShift(shift).f;
+
+        let focal = current.f;
         if (!(focal > 1e-6)) focal = 1e-3;
         return { focal, shift };
     }
