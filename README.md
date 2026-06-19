@@ -1,138 +1,139 @@
 # Image to Mesh Web
 
-MoGe-2を使って1枚の画像から深度と3D形状を推定し、ブラウザ上でメッシュとして確認できるWebアプリです。
+Image to Mesh Web uses MoGe-2 to estimate depth and 3D geometry from a single image and displays the result as an interactive mesh in your browser.
 
-画像と推定結果はブラウザ内で処理されます。推定モデルは初回利用時にダウンロードされ、ブラウザのキャッシュへ保存されます。
+Images and inference results are processed locally in the browser. The selected model is downloaded on first use and stored in the browser cache.
 
-**[Image to Mesh Webを開く](https://tomosud.github.io/Image_to_Mesh_web/)**
+**[Open Image to Mesh Web](https://tomosud.github.io/Image_to_Mesh_web/)**
 
-使用モデル: [microsoft/MoGe](https://github.com/microsoft/moge)
+Model: [microsoft/MoGe](https://github.com/microsoft/moge)
 
-## 動作環境
+## Requirements
 
-- 最新版のGoogle ChromeまたはMicrosoft Edge
-- WebGPU対応のGPUを推奨
-- モデルとライブラリの初回ダウンロードにインターネット接続が必要
-- JPGまたはPNG画像
+- The latest version of Google Chrome or Microsoft Edge
+- A WebGPU-capable GPU is recommended
+- An internet connection for the initial model and library downloads
+- A JPG or PNG image
 
-端末の性能やブラウザのメモリ容量によっては、大きなモデルを読み込めない場合があります。
+Large models may fail to load if the device or browser does not have enough available memory.
 
-## 使い方
+## Usage
 
-1. 画面へJPGまたはPNG画像をドロップします。画面をクリックしてファイルを選択することもできます。
-2. モデルの読み込みと推定が完了するまで待ちます。初回はモデルのダウンロードに時間がかかります。
-3. マウスでメッシュを確認します。
-   - 左ドラッグ: 回転
-   - ホイール: ズーム
-   - 右ドラッグ: パン
-4. 必要に応じて設定を変更し、「再計算」を押します。
-5. Depth、World Position、OBJ、表示画像などをダウンロードします。
+1. Drop a JPG or PNG image onto the page, or click the drop area to select a file.
+2. Wait for the model to load and inference to finish. The first run may take longer because the model must be downloaded.
+3. Inspect the mesh with the mouse:
+   - Left drag: rotate
+   - Mouse wheel: zoom
+   - Right drag: pan
+4. Change the settings as needed and click **Recompute**.
+5. Download the depth map, world position map, OBJ mesh, or rendered image.
 
-別の画像を処理する場合は「別の画像」を押すか、新しい画像を画面へドロップします。
+To process another image, click **Another Image** or drop a new image onto the page.
 
-## 推定設定
+## Inference Settings
 
-### モデル
+### Model
 
-| モデル | 特徴 | おおよそのサイズ |
+| Model | Description | Approximate size |
 |---|---|---:|
-| ViT-S | 最速。メモリ消費が少ない | 150 MB |
-| ViT-B | 速度と品質のバランスがよい。既定値 | 400 MB |
-| ViT-L | 最も高品質。WebGPUと大容量メモリを推奨 | 1.32 GB |
+| ViT-S | Fastest and uses the least memory | 150 MB |
+| ViT-B | Balanced speed and quality; selected by default | 400 MB |
+| ViT-L | Highest quality; WebGPU and ample memory recommended | 1.32 GB |
 
-モデルを変更した後に「再計算」を押すと、選択したモデルを読み込んで再推定します。
+After changing the model, click **Recompute** to load it and run inference again.
 
-推定に成功したモデルはブラウザへ保存され、次回起動時にも自動選択されます。実際に使用された実行方式（WebGPUまたはWASM）は画面左上の「実行」で確認できます。
+The model used for a successful inference is saved in the browser and automatically selected on the next visit. The active execution provider, **WebGPU** or **WASM**, is shown in the upper-left information panel.
 
-### 精度（num_tokens）
+### Quality (`num_tokens`)
 
-値を上げると細部の推定品質が向上しやすくなりますが、処理時間とメモリ消費も増えます。
+Higher values can preserve finer details but require more processing time and memory.
 
-- 設定範囲: 1200～2500
-- 既定値: 1800
-- 処理が失敗する場合: 値を下げるか、小さいモデルへ変更
+- Range: 1200–2500
+- Default: 1800
+- If inference fails, reduce this value or select a smaller model
 
-### スケール
+### Scale
 
-出力する3D形状全体の大きさを変更します。形状や深度の相対関係は変わりません。
+Changes the overall size of the generated 3D geometry. It does not change the relative shape or depth relationships.
 
-### マスク適用
+### Apply Mask
 
-背景、空、不確実な領域をメッシュから除外します。通常はONのまま使用してください。
+Removes the background, sky, and uncertain regions from the mesh. Keep this enabled for most images.
 
-OFFにすると画像全体を出力できますが、背景との境界に不要な形状が現れる場合があります。
+Disabling it includes the full image but may create unwanted geometry around foreground boundaries.
 
-## 表示設定
+## Display Settings
 
-- 頂点のみ表示: メッシュをポイントクラウドとして表示
-- 点のサイズ: ポイント表示時の大きさを変更
-- ライティングなし: 画像の色を照明の影響なしで表示
-- カラーなし: 画像テクスチャを非表示
-- ワイヤーフレーム: メッシュの三角形を表示
-- 視点リセット: カメラを初期位置へ戻す
-- キャプチャ範囲表示: PNG出力の範囲を表示
+- Points Only: display the geometry as a point cloud
+- Point Size: change the point size in point-cloud mode
+- Unlit: display image colors without lighting
+- No Color: hide the image texture
+- Wireframe: show the mesh triangles
+- Reset View: restore the camera position
+- Show Capture Frame: show the area used for PNG export
+- UI OFF / UI ON: hide or restore the interface panels
 
-## ダウンロード
+## Downloads
 
-| ボタン | 出力内容 |
+| Button | Output |
 |---|---|
-| 元画像 | 入力したJPGまたはPNG |
-| Depth (EXR) | FLOATの深度データ。`Y`チャンネル |
-| WorldPos (EXR) | FLOATのワールドポジション。`R=X`、`G=Y`、`B=Z` |
-| OBJ | 三角形メッシュとUV |
-| PNG (2048) | 現在の視点を2048×2048で保存 |
+| Original | The source JPG or PNG file |
+| Depth (EXR) | FLOAT depth data in the `Y` channel |
+| WorldPos (EXR) | FLOAT world positions with `R=X`, `G=Y`, and `B=Z` |
+| OBJ | Triangle mesh with UV coordinates |
+| PNG (2048) | The current view rendered at 2048×2048 |
 
-ファイル名は入力画像の名前を基準に生成されます。
+Output file names are based on the source image name.
 
-World PositionとOBJはHoudini向けのY-up座標系です。
+World Position and OBJ outputs use a Y-up coordinate system intended for Houdini.
 
-## ローカルで起動する
+## Run Locally
 
-`file://`から直接開くのではなく、ローカルHTTPサーバーを使用してください。
+Use a local HTTP server instead of opening the page directly through `file://`.
 
-WindowsではPythonがインストールされていれば、`run.bat`を実行すると `http://localhost:8000/` が開きます。
+On Windows, if Python is installed, run `run.bat` to start the server and open `http://localhost:8000/`.
 
-手動で起動する場合:
+To start it manually:
 
 ```powershell
 cd Image_to_Mesh_web
 python -m http.server 8000
 ```
 
-その後、ChromeまたはEdgeで次のURLを開きます。
+Then open the following URL in Chrome or Edge:
 
 ```text
 http://localhost:8000/
 ```
 
-終了するにはサーバーを実行している画面で `Ctrl+C` を押します。
+Press `Ctrl+C` in the server terminal to stop it.
 
-## うまく動かない場合
+## Troubleshooting
 
-### モデルの読み込みに失敗する
+### The model fails to load
 
-- ChromeまたはEdgeを最新版へ更新してください。
-- 他のタブやアプリを閉じ、使用可能なメモリを増やしてください。
-- ViT-SまたはViT-Bへ変更してください。
-- ブラウザのキャッシュを削除した場合、モデルは再ダウンロードされます。
+- Update Chrome or Edge to the latest version.
+- Close other tabs and applications to free memory.
+- Select ViT-S or ViT-B.
+- If the browser cache was cleared, the model must be downloaded again.
 
-### 推定中に停止する
+### Inference stops or fails
 
-- `num_tokens`を下げてください。
-- 小さいモデルへ変更してください。
-- 入力画像の解像度を下げてください。
+- Reduce `num_tokens`.
+- Select a smaller model.
+- Reduce the source image resolution.
 
-### 背景に不要な面が出る
+### Unwanted faces appear in the background
 
-- 「マスク適用」をONにしてください。
-- 被写体と背景の境界が明確な画像を使用してください。
+- Enable **Apply Mask**.
+- Use an image with a clear boundary between the subject and background.
 
-### 形状や距離が正確でない
+### Shape or distance is inaccurate
 
-単眼画像からの3D推定には曖昧さがあります。透明物、鏡、細い物体、模様の少ない面、強いボケ、極端な広角画像などは誤差が大きくなる場合があります。
+Single-image 3D estimation is inherently ambiguous. Transparent objects, mirrors, thin structures, textureless surfaces, strong blur, and extreme wide-angle images may produce larger errors.
 
-## ライセンス
+## License
 
-このツールは[MIT License](LICENSE)で公開しています。
+This tool is released under the [MIT License](LICENSE).
 
-推定には[microsoft/MoGe](https://github.com/microsoft/moge)のMoGe-2を使用しています。MoGeのコードはMIT License、MoGeに含まれるDINOv2コードはApache License 2.0です。モデルおよび関連コンポーネントの利用時は、それぞれのライセンス条件にも従ってください。
+Inference uses MoGe-2 from [microsoft/MoGe](https://github.com/microsoft/moge). MoGe code is licensed under the MIT License, while the DINOv2 code included in MoGe is licensed under the Apache License 2.0. Use the models and related components in accordance with their respective licenses.

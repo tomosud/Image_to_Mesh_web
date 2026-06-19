@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,70 +15,70 @@
         <div id="captureFrame"></div>
 
         <div id="dropZone">
-            <div id="dropText">画像をドロップ</div>
+            <div id="dropText">Drop an Image</div>
             <div id="dropSubtext">
-                JPG / PNG 画像をドロップすると<br>
-                MoGe-2 で推定 → ワールドポジション化 → メッシュ表示します<br>
-                <span style="opacity:.8">(クリックでファイル選択も可)</span>
+                Drop a JPG or PNG image to estimate depth with MoGe-2<br>
+                and display it as a world-position mesh.<br>
+                <span style="opacity:.8">Click here to select a file</span>
             </div>
         </div>
 
-        <!-- 右上: ビューア表示コントロール -->
+        <!-- Upper-right: viewer controls -->
         <div id="controls">
             <div class="control-panel">
                 <div class="control-group">
                     <label class="chk">
                         <input type="checkbox" id="pointsMode">
-                        頂点のみ表示
+                        Points Only
                     </label>
                     <label class="chk">
                         <input type="checkbox" id="disableLighting" checked>
-                        ライティングなし
+                        Unlit
                     </label>
                     <label class="chk">
                         <input type="checkbox" id="disableColor">
-                        カラーなし
+                        No Color
                     </label>
                 </div>
                 <div class="control-group" id="pointSizeControl" style="display: none;">
-                    <label>点のサイズ (px)</label>
+                    <label>Point Size (px)</label>
                     <div class="slider-container">
                         <input type="range" id="pointSize" min="1" max="30" step="0.5" value="2">
                         <span class="slider-value" id="pointSizeValue">2.0</span>
                     </div>
                 </div>
                 <div class="control-group">
-                    <button id="resetView">視点リセット</button>
-                    <button id="toggleWireframe">ワイヤーフレーム</button>
+                    <button id="resetView">Reset View</button>
+                    <button id="toggleWireframe">Wireframe</button>
                 </div>
                 <div class="control-group">
                     <label class="chk">
                         <input type="checkbox" id="showCaptureFrame">
-                        キャプチャ範囲表示
+                        Show Capture Frame
                     </label>
                 </div>
             </div>
         </div>
 
-        <!-- 右下: 推論パラメータ + ダウンロード -->
+        <!-- Lower-right: inference settings and downloads -->
         <div id="sidePanel">
             <div class="control-panel">
                 <div class="control-group">
-                    <label>モデル</label>
+                    <label>Model</label>
                     <select id="modelSelect">
-                        <option value="vits">ViT-S（最小・最速 / 約150MB）</option>
-                        <option value="vitb" selected>ViT-B（標準 / 約400MB）</option>
-                        <option value="vitl">ViT-L（高精度 / 約1.32GB・WebGPU必須）</option>
+                        <option value="vits">ViT-S (Smallest / Fastest / ~150 MB)</option>
+                        <option value="vitb" selected>ViT-B (Balanced / ~400 MB)</option>
+                        <option value="vitl">ViT-L (Highest Quality / ~1.32 GB / WebGPU)</option>
                     </select>
                 </div>
                 <div class="control-group">
-                    <label>精度 (num_tokens): <span id="numTokensValue">1800</span></label>
+                    <label>Quality (num_tokens): <span id="numTokensValue">1800</span></label>
                     <div class="slider-container">
                         <input type="range" id="numTokens" min="1200" max="2500" step="100" value="1800">
                     </div>
                 </div>
                 <div class="control-group">
-                    <label>スケール: <span id="scaleValue">1.0</span></label>
+                    <label>Scale: <span id="scaleValue">1.0</span></label>
                     <div class="slider-container">
                         <input type="range" id="scale" min="0.1" max="10" step="0.1" value="1">
                     </div>
@@ -86,16 +86,16 @@
                 <div class="control-group">
                     <label class="chk">
                         <input type="checkbox" id="applyMask" checked>
-                        マスク適用 (背景/空を除外)
+                        Apply Mask (remove background / sky)
                     </label>
                 </div>
                 <div class="control-group">
-                    <button id="recompute" disabled>再計算</button>
-                    <button id="loadAnother">別の画像</button>
+                    <button id="recompute" disabled>Recompute</button>
+                    <button id="loadAnother">Another Image</button>
                 </div>
                 <div class="control-group dl-group">
-                    <div class="dl-title">ダウンロード</div>
-                    <button id="dlImage" disabled>元画像</button>
+                    <div class="dl-title">Downloads</div>
+                    <button id="dlImage" disabled>Original</button>
                     <button id="dlDepth" disabled>Depth (EXR)</button>
                     <button id="dlWorldPos" disabled>WorldPos (EXR)</button>
                     <button id="exportOBJ" disabled>OBJ</button>
@@ -107,7 +107,7 @@
         <div id="loadingOverlay">
             <div class="loader">
                 <div class="spinner"></div>
-                <div id="loadingText">読み込み中...</div>
+                <div id="loadingText">Loading...</div>
                 <div id="loadingProgress" class="progress" style="display:none;">
                     <div id="loadingBar" class="progress-bar"></div>
                 </div>
@@ -115,18 +115,18 @@
         </div>
 
         <div id="info">
-            <div>左ドラッグ: 回転</div>
-            <div>ホイール: ズーム</div>
-            <div>右ドラッグ: パン</div>
+            <div>Left drag: Rotate</div>
+            <div>Wheel: Zoom</div>
+            <div>Right drag: Pan</div>
         </div>
 
         <div id="meshInfo">
             <div class="info-panel">
-                <div><span class="info-label">実行:</span> <span id="executionProvider">--</span></div>
-                <div><span class="info-label">解像度:</span> <span id="meshResolution">--</span></div>
-                <div><span class="info-label">範囲 X:</span> <span id="rangeX">--</span></div>
-                <div><span class="info-label">範囲 Y:</span> <span id="rangeY">--</span></div>
-                <div><span class="info-label">範囲 Z:</span> <span id="rangeZ">--</span></div>
+                <div><span class="info-label">Provider:</span> <span id="executionProvider">--</span></div>
+                <div><span class="info-label">Resolution:</span> <span id="meshResolution">--</span></div>
+                <div><span class="info-label">X Range:</span> <span id="rangeX">--</span></div>
+                <div><span class="info-label">Y Range:</span> <span id="rangeY">--</span></div>
+                <div><span class="info-label">Z Range:</span> <span id="rangeZ">--</span></div>
             </div>
         </div>
 

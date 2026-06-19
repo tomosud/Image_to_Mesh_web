@@ -8,17 +8,17 @@ const Inference = (function () {
     // 既定はブラウザで動作する ViT-B。WebGPU 環境では ViT-L も選択可。
     const MODELS = {
         vits: {
-            label: 'ViT-S（最小・最速 / 約150MB）',
+            label: 'ViT-S (Smallest / Fastest / ~150 MB)',
             url: 'https://huggingface.co/Ruicheng/moge-2-vits-normal-onnx/resolve/main/model.onnx',
             cache: 'moge2-vits-onnx-cache-v1'
         },
         vitb: {
-            label: 'ViT-B（標準 / 約400MB）',
+            label: 'ViT-B (Balanced / ~400 MB)',
             url: 'https://huggingface.co/Ruicheng/moge-2-vitb-normal-onnx/resolve/main/model.onnx',
             cache: 'moge2-vitb-onnx-cache-v1'
         },
         vitl: {
-            label: 'ViT-L（高精度 / 約1.32GB・WebGPU必須）',
+            label: 'ViT-L (Highest Quality / ~1.32 GB / WebGPU)',
             url: 'https://huggingface.co/Ruicheng/moge-2-vitl-normal-onnx/resolve/main/model.onnx',
             cache: 'moge2-vitl-onnx-cache-v1'
         }
@@ -62,7 +62,7 @@ const Inference = (function () {
         }
 
         const resp = await fetch(MODEL_URL);
-        if (!resp.ok) throw new Error(`モデル取得失敗: HTTP ${resp.status}`);
+        if (!resp.ok) throw new Error(`Failed to download the model: HTTP ${resp.status}`);
 
         const total = Number(resp.headers.get('content-length')) || 0;
         const reader = resp.body.getReader();
@@ -84,7 +84,7 @@ const Inference = (function () {
                 await cache.put(MODEL_URL, new Response(bytes.slice(0), {
                     headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(received) }
                 }));
-            } catch (e) { console.warn('モデルキャッシュ保存失敗:', e); }
+            } catch (e) { console.warn('Failed to cache the model:', e); }
         }
         return bytes.buffer;
     }
@@ -120,7 +120,7 @@ const Inference = (function () {
                 console.log('MoGe ONNX session created with EP:', eps[0], 'model:', currentModelKey, 'inputs:', session.inputNames, 'outputs:', session.outputNames);
                 return session;
             } catch (e) {
-                console.warn(`EP ${eps[0]} 失敗:`, e);
+                console.warn(`Execution provider ${eps[0]} failed:`, e);
                 if (eps[0] === 'webgpu' && onProgress) {
                     onProgress({
                         phase: 'fallback',
@@ -134,26 +134,26 @@ const Inference = (function () {
                 lastErr = e;
             }
         }
-        throw new Error('ONNX セッション作成に失敗: ' + (lastErr ? lastErr.message : 'unknown'));
+        throw new Error('Failed to create an ONNX session: ' + (lastErr ? lastErr.message : 'unknown'));
     }
 
     async function detectWebGPU() {
         if (!window.isSecureContext) {
-            return { available: false, reason: 'WebGPUにはHTTPSまたはlocalhostが必要です' };
+            return { available: false, reason: 'WebGPU requires HTTPS or localhost' };
         }
         if (!navigator.gpu) {
-            return { available: false, reason: 'このブラウザではWebGPU APIが利用できません' };
+            return { available: false, reason: 'The WebGPU API is not available in this browser' };
         }
         try {
             const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
             if (!adapter) {
-                return { available: false, reason: '利用可能なGPU adapterを取得できませんでした' };
+                return { available: false, reason: 'No compatible GPU adapter was found' };
             }
             return { available: true, reason: '' };
         } catch (e) {
             return {
                 available: false,
-                reason: e && e.message ? e.message : 'GPU adapterの取得に失敗しました'
+                reason: e && e.message ? e.message : 'Failed to acquire a GPU adapter'
             };
         }
     }
@@ -201,7 +201,7 @@ const Inference = (function () {
     // 戻り値: { points: Float32[inH*inW*3], normal, mask: Float32[inH*inW],
     //          metricScale: number, width: inW, height: inH }
     async function run(imageData, numTokens) {
-        if (!session) throw new Error('モデル未ロード');
+        if (!session) throw new Error('The model is not loaded');
         numTokens = numTokens || 1800;
         const { inW, inH } = computeInputSize(imageData.width, imageData.height, numTokens);
 

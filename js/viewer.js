@@ -309,7 +309,7 @@ const Viewer = (function () {
     // ---- エクスポート ----
     function exportOBJ() {
         const target = mesh || pointsMesh;
-        if (!target) { alert('メッシュが読み込まれていません。'); return; }
+        if (!target) { alert('No mesh is loaded.'); return; }
         const geometry = target.geometry;
         const positions = geometry.attributes.position.array;
         const uvs = geometry.attributes.uv.array;
@@ -335,7 +335,7 @@ const Viewer = (function () {
     }
 
     function exportPNG() {
-        if (!mesh && !pointsMesh) { alert('メッシュが読み込まれていません。'); return; }
+        if (!mesh && !pointsMesh) { alert('No mesh is loaded.'); return; }
         const exportSize = 2048;
         const currentAspect = camera.aspect;
         const exportCanvas = document.createElement('canvas');

@@ -10,14 +10,14 @@ echo ======================================================================
 echo Image to Mesh Web - Local Server
 echo ======================================================================
 echo.
-echo  http://localhost:%PORT%/ を開きます
-echo  停止するには この画面で Ctrl+C を押してください
+echo  Opening http://localhost:%PORT%/
+echo  Press Ctrl+C in this window to stop the server
 echo.
 
-REM 既定ブラウザで開く（サーバー起動後に少し待ってから）
+REM Open the default browser after the server has had time to start
 start "" cmd /c "timeout /t 2 >nul & start http://localhost:%PORT%/"
 
-REM Python の簡易 HTTP サーバーを起動
+REM Start Python's built-in HTTP server
 python -m http.server %PORT%
 
 popd

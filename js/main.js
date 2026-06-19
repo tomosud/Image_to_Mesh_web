@@ -18,7 +18,7 @@
     function showLoading(show, text, ratio) {
         const overlay = $('loadingOverlay');
         if (show) {
-            $('loadingText').textContent = text || '読み込み中...';
+            $('loadingText').textContent = text || 'Loading...';
             const prog = $('loadingProgress');
             if (ratio != null) {
                 prog.style.display = 'block';
@@ -105,35 +105,35 @@
         currentBaseName = file.name.replace(/\.(jpg|jpeg|png)$/i, '');
 
         try {
-            showLoading(true, '画像を読み込み中...');
+            showLoading(true, 'Loading image...');
             currentImageData = await readImageFile(file);
 
             if (!modelReady) {
-                showLoading(true, 'モデルを準備中...', 0);
+                showLoading(true, 'Preparing model...', 0);
                 await Inference.loadModel((p) => {
                     if (p.phase === 'download') {
                         const mb = p.total ? ` (${(p.received / 1048576).toFixed(0)}/${(p.total / 1048576).toFixed(0)}MB)` : '';
-                        showLoading(true, `モデルをダウンロード中...${mb}`, p.ratio);
+                        showLoading(true, `Downloading model...${mb}`, p.ratio);
                     } else if (p.phase === 'cache') {
-                        showLoading(true, 'キャッシュからモデル読込...', 1);
+                        showLoading(true, 'Loading model from cache...', 1);
                     } else if (p.phase === 'session') {
-                        showLoading(true, `推論エンジン初期化中 (${p.provider})...`);
+                        showLoading(true, `Initializing inference engine (${p.provider})...`);
                     } else if (p.phase === 'capability' && !p.available) {
                         console.info('WebGPU unavailable:', p.reason);
-                        showLoading(true, 'WebGPU利用不可 → WASMで初期化中...');
+                        showLoading(true, 'WebGPU unavailable; initializing WASM...');
                     } else if (p.phase === 'fallback') {
                         console.warn('WebGPU fallback:', p.reason);
-                        showLoading(true, 'WebGPU初期化失敗 → WASMへ切替中...');
+                        showLoading(true, 'WebGPU initialization failed; switching to WASM...');
                     }
                 });
                 modelReady = true;
             }
 
-            showLoading(true, 'デプス推定中 (MoGe-2)...');
+            showLoading(true, 'Estimating depth with MoGe-2...');
             lastNumTokens = getNumTokens();
             currentMoge = await Inference.run(currentImageData, lastNumTokens);
 
-            showLoading(true, 'ワールドポジション計算中...');
+            showLoading(true, 'Computing world positions...');
             recompute();
 
             const provider = Inference.getActiveProvider();
@@ -141,7 +141,7 @@
             try {
                 localStorage.setItem(MODEL_STORAGE_KEY, currentModelKey);
             } catch (e) {
-                console.warn('モデル設定を保存できませんでした:', e);
+                console.warn('Failed to save the model preference:', e);
             }
 
             showUI();
@@ -149,7 +149,7 @@
         } catch (e) {
             console.error(e);
             showLoading(false);
-            alert('処理に失敗しました:\n' + (e && e.message ? e.message : e));
+            alert('Processing failed:\n' + (e && e.message ? e.message : e));
         }
     }
 
@@ -184,7 +184,7 @@
             if (/\.(jpg|jpeg|png)$/i.test(f.name)) { imageFile = f; break; }
         }
         if (!imageFile) {
-            alert('JPG / PNG 画像をドロップしてください。');
+            alert('Please drop a JPG or PNG image.');
             return;
         }
         processImage(imageFile);
@@ -214,7 +214,7 @@
         $('toggleWireframe').addEventListener('click', () => {
             if (Viewer.isPoints()) return;
             const wf = Viewer.toggleWireframe();
-            $('toggleWireframe').textContent = wf ? 'ソリッド表示' : 'ワイヤーフレーム';
+            $('toggleWireframe').textContent = wf ? 'Solid' : 'Wireframe';
         });
         $('disableLighting').addEventListener('change', (e) => {
             if (Viewer.isPoints()) return;
@@ -270,7 +270,7 @@
                 Inference.setModel(savedModel);
             }
         } catch (e) {
-            console.warn('モデル設定を復元できませんでした:', e);
+            console.warn('Failed to restore the model preference:', e);
         }
     }
 
