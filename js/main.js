@@ -177,6 +177,12 @@
 
     // ---- コントロール配線 ----
     function setupControls() {
+        $('toggleUI').addEventListener('click', () => {
+            const hidden = document.body.classList.toggle('ui-hidden');
+            $('toggleUI').textContent = hidden ? 'UI ON' : 'UI OFF';
+            $('toggleUI').setAttribute('aria-pressed', hidden ? 'true' : 'false');
+        });
+
         // 表示モード
         $('pointsMode').addEventListener('change', (e) => {
             const on = e.target.checked;
