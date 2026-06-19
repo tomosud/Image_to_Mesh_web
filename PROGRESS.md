@@ -2,6 +2,47 @@
 
 > トークン制限に備え、各ステップ完了ごとに更新する作業ログ。再開時はここを最初に読む。
 
+---
+
+## ★ MoGe-2 移行（最新・確定） — 実装完了
+
+DA3METRIC-LARGE は intrinsics 非出力のため FOV 仮定が必要で、球面状の歪み（湾曲）が出た。
+カメラ焦点/シフトを点群から復元できる **MoGe-2** に移行。計画は [PLAN_MOGE.md](PLAN_MOGE.md)。
+
+### モデル
+- `Ruicheng/moge-2-vitl-normal-onnx` の `model.onnx`（約1.32GB, FP32, 動的形状 + 可変トークン）
+- 入力: `image`[1,3,H,W]（ImageNet正規化）+（任意）`num_tokens` int64 スカラー
+- 出力: `points`[1,H,W,3]（アフィン点群）/ `normal`[1,H,W,3] / `mask`[1,H,W]（sigmoid）/ `metric_scale`[1]
+
+### 実装状況（すべて完了）
+- [x] inference.js を MoGe 用に書換（4出力、num_tokens対応、入力サイズ算出）
+- [x] moge_post.js 新規（recover_focal_shift 最小二乗、正規化intrinsics、逆投影、metric適用、mask二値化）
+- [x] worldpos.js を `WorldPos.fromCameraPoints(camPoints,W,H,maskBin,{scale,applyMask})` に簡素化
+- [x] main.js パイプライン差替（Inference.run → MogePost.process → WorldPos.fromCameraPoints → Viewer.setData）
+- [x] index.html UI 変更：FOV撤去、`num_tokens`スライダ追加、`metricScale`→`applyMask`、`moge_post.js`読込追加
+- [x] get_errors で JS/HTML 静的エラーなしを確認
+
+### パイプライン（現行）
+1. `Inference.run(imageData, numTokens)` → 生 MoGe 出力（モデル解像度 inW×inH）
+2. `MogePost.process(moge, {useMetric:true})` → カメラ空間メトリック点群 + depth + intrinsics + 二値mask
+3. `WorldPos.fromCameraPoints(...)` → Houdini WP（out=[-X*scale, -Y*scale, Z*scale, 1]、applyMaskでNaN）
+4. `Viewer.setData(...)` → メッシュ表示（色テクスチャは元画像解像度、ビューア側で補間）
+- 再計算: num_tokens 変更時のみ再推論、scale/mask変更は後処理のみ（軽量）
+
+### 未検証 / 実機確認が必要
+1. **モデルDL**: 約1.32GB。初回DLは時間がかかる（Cache APIで2回目以降は高速）。HF CDN CORS要確認。
+2. **後処理の数値妥当性**: focal/shift 復元、reprojection の見た目（歪みが取れているか）。
+3. **mask の効き**: 背景/空の除外が意図通りか。
+4. **num_tokens の最適値**: 既定1800。精度/速度トレードオフ。
+5. EXR 互換性（Houdini等で開けるか）は従来同様要確認。
+
+### 次のアクション
+- ローカル（run.bat → http://localhost:8000）で実機テスト → 上記の確認・調整。
+
+---
+
+## （以下は DA3METRIC 時代のログ・参考）
+
 ## 全体ステップ
 - [x] 0. 計画策定（[PLAN.md](PLAN.md)）
 - [x] 1. プロジェクト雛形（index.html / css / .nojekyll）

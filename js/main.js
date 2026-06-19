@@ -4,10 +4,12 @@
     // 状態
     let currentFile = null;        // 元画像 File
     let currentImageData = null;   // 元解像度 ImageData
-    let currentDepth = null;       // { depth, width, height } (504x280)
-    let currentWP = null;          // { data, width, height, intrinsics } (元解像度)
+    let currentMoge = null;        // 生 MoGe 出力 { points, normal, mask, metricScale, width, height }
+    let currentPost = null;        // 後処理結果 { points, depth, mask, intrinsics, width, height }
+    let currentWP = null;          // { data, width, height } (モデル解像度)
     let currentBaseName = 'mesh';
     let modelReady = false;
+    let lastNumTokens = 1800;
 
     const $ = (id) => document.getElementById(id);
 
@@ -72,46 +74,24 @@
         };
     }
 
-    // depth(504x280) を元画像解像度へバイリニア補間
-    function upscaleDepth(depth, dW, dH, tW, tH) {
-        const out = new Float32Array(tW * tH);
-        for (let y = 0; y < tH; y++) {
-            const sy = (y / (tH - 1)) * (dH - 1);
-            const y0 = Math.floor(sy), y1 = Math.min(y0 + 1, dH - 1);
-            const fy = sy - y0;
-            for (let x = 0; x < tW; x++) {
-                const sx = (x / (tW - 1)) * (dW - 1);
-                const x0 = Math.floor(sx), x1 = Math.min(x0 + 1, dW - 1);
-                const fx = sx - x0;
-                const v00 = depth[y0 * dW + x0];
-                const v10 = depth[y0 * dW + x1];
-                const v01 = depth[y1 * dW + x0];
-                const v11 = depth[y1 * dW + x1];
-                const v0 = v00 * (1 - fx) + v10 * fx;
-                const v1 = v01 * (1 - fx) + v11 * fx;
-                out[y * tW + x] = v0 * (1 - fy) + v1 * fy;
-            }
-        }
-        return out;
-    }
+    function getNumTokens() { return parseInt($('numTokens').value, 10); }
 
     function getOpts() {
         return {
-            fovDeg: parseFloat($('fov').value),
             scale: parseFloat($('scale').value),
-            useMetricScale: $('metricScale').checked
+            applyMask: $('applyMask').checked
         };
     }
 
-    // depth → WP → ビューア反映
+    // 後処理 → WP → ビューア反映（推論はやり直さない、軽量）
     function recompute() {
-        if (!currentImageData || !currentDepth) return;
-        const tW = currentImageData.width;
-        const tH = currentImageData.height;
-        const upDepth = upscaleDepth(currentDepth.depth, currentDepth.width, currentDepth.height, tW, tH);
-        currentWP = WorldPos.compute(upDepth, tW, tH, getOpts());
-        currentWP.upDepth = upDepth; // depth EXR 用に元解像度depthを保持
-
+        if (!currentMoge) return;
+        // metric scale 適用は常時。mask 適用は表示側 opts。
+        currentPost = MogePost.process(currentMoge, { useMetric: true });
+        const opts = getOpts();
+        currentWP = WorldPos.fromCameraPoints(
+            currentPost.points, currentPost.width, currentPost.height, currentPost.mask, opts
+        );
         const colorTex = colorTexFromImageData(currentImageData);
         Viewer.setData(currentWP.data, currentWP.width, currentWP.height, colorTex, currentBaseName);
         setDownloadEnabled(true);
@@ -141,8 +121,9 @@
                 modelReady = true;
             }
 
-            showLoading(true, 'デプス推定中...');
-            currentDepth = await Inference.run(currentImageData);
+            showLoading(true, 'デプス推定中 (MoGe-2)...');
+            lastNumTokens = getNumTokens();
+            currentMoge = await Inference.run(currentImageData, lastNumTokens);
 
             showLoading(true, 'ワールドポジション計算中...');
             recompute();
@@ -226,16 +207,24 @@
         });
 
         // 推論パラメータ
-        $('fov').addEventListener('input', (e) => { $('fovValue').textContent = e.target.value; });
+        $('numTokens').addEventListener('input', (e) => { $('numTokensValue').textContent = e.target.value; });
         $('scale').addEventListener('input', (e) => { $('scaleValue').textContent = parseFloat(e.target.value).toFixed(1); });
-        $('recompute').addEventListener('click', recompute);
+        $('applyMask').addEventListener('change', recompute);
+        $('recompute').addEventListener('click', () => {
+            // num_tokens が変わっていれば再推論、そうでなければ後処理のみ
+            if (getNumTokens() !== lastNumTokens && currentImageData) {
+                processImage(currentFile);
+            } else {
+                recompute();
+            }
+        });
         $('loadAnother').addEventListener('click', () => $('fileInput').click());
 
         // ダウンロード
         $('dlImage').addEventListener('click', () => Downloader.saveOriginal(currentFile));
         $('dlDepth').addEventListener('click', () => {
-            if (!currentWP) return;
-            Downloader.saveDepthEXR(currentWP.upDepth, currentWP.width, currentWP.height, currentBaseName);
+            if (!currentPost) return;
+            Downloader.saveDepthEXR(currentPost.depth, currentPost.width, currentPost.height, currentBaseName);
         });
         $('dlWorldPos').addEventListener('click', () => {
             if (!currentWP) return;

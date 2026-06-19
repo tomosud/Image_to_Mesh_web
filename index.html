@@ -16,7 +16,7 @@
             <div id="dropText">画像をドロップ</div>
             <div id="dropSubtext">
                 JPG / PNG 画像をドロップすると<br>
-                デプス推定 → ワールドポジション化 → メッシュ表示します<br>
+                MoGe-2 で推定 → ワールドポジション化 → メッシュ表示します<br>
                 <span style="opacity:.8">(クリックでファイル選択も可)</span>
             </div>
         </div>
@@ -62,9 +62,9 @@
         <div id="sidePanel">
             <div class="control-panel">
                 <div class="control-group">
-                    <label>視野角 FOV: <span id="fovValue">60</span>°</label>
+                    <label>精度 (num_tokens): <span id="numTokensValue">1800</span></label>
                     <div class="slider-container">
-                        <input type="range" id="fov" min="20" max="120" step="1" value="60">
+                        <input type="range" id="numTokens" min="1200" max="2500" step="100" value="1800">
                     </div>
                 </div>
                 <div class="control-group">
@@ -75,8 +75,8 @@
                 </div>
                 <div class="control-group">
                     <label class="chk">
-                        <input type="checkbox" id="metricScale" checked>
-                        焦点メトリックスケール (focal/300)
+                        <input type="checkbox" id="applyMask">
+                        マスク適用 (背景/空を除外)
                     </label>
                 </div>
                 <div class="control-group">
@@ -131,6 +131,7 @@
 
     <!-- App modules -->
     <script src="js/exr.js"></script>
+    <script src="js/moge_post.js"></script>
     <script src="js/worldpos.js"></script>
     <script src="js/viewer.js"></script>
     <script src="js/inference.js"></script>
