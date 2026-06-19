@@ -11,6 +11,7 @@
     let modelReady = false;
     let lastNumTokens = 1800;
     let currentModelKey = 'vitb';
+    const MODEL_STORAGE_KEY = 'image-to-mesh:model';
 
     const $ = (id) => document.getElementById(id);
 
@@ -117,6 +118,12 @@
                         showLoading(true, 'キャッシュからモデル読込...', 1);
                     } else if (p.phase === 'session') {
                         showLoading(true, `推論エンジン初期化中 (${p.provider})...`);
+                    } else if (p.phase === 'capability' && !p.available) {
+                        console.info('WebGPU unavailable:', p.reason);
+                        showLoading(true, 'WebGPU利用不可 → WASMで初期化中...');
+                    } else if (p.phase === 'fallback') {
+                        console.warn('WebGPU fallback:', p.reason);
+                        showLoading(true, 'WebGPU初期化失敗 → WASMへ切替中...');
                     }
                 });
                 modelReady = true;
@@ -128,6 +135,14 @@
 
             showLoading(true, 'ワールドポジション計算中...');
             recompute();
+
+            const provider = Inference.getActiveProvider();
+            $('executionProvider').textContent = provider ? provider.toUpperCase() : '--';
+            try {
+                localStorage.setItem(MODEL_STORAGE_KEY, currentModelKey);
+            } catch (e) {
+                console.warn('モデル設定を保存できませんでした:', e);
+            }
 
             showUI();
             showLoading(false);
@@ -246,8 +261,22 @@
         $('exportPNG').addEventListener('click', Viewer.exportPNG);
     }
 
+    function restorePreferences() {
+        try {
+            const savedModel = localStorage.getItem(MODEL_STORAGE_KEY);
+            if (savedModel && Inference.MODELS[savedModel]) {
+                currentModelKey = savedModel;
+                $('modelSelect').value = savedModel;
+                Inference.setModel(savedModel);
+            }
+        } catch (e) {
+            console.warn('モデル設定を復元できませんでした:', e);
+        }
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
         Viewer.init();
+        restorePreferences();
         setupDropZone();
         setupControls();
     });

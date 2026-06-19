@@ -29,6 +29,7 @@ const Inference = (function () {
     let session = null;
     let hasNumTokensInput = false;
     let loadedModelKey = null;
+    let activeProvider = null;
 
     function setModel(key) {
         if (!MODELS[key]) return;
@@ -37,6 +38,7 @@ const Inference = (function () {
             if (session) { try { session.release && session.release(); } catch (e) { } }
             session = null;
             loadedModelKey = null;
+            activeProvider = null;
         }
         currentModelKey = key;
     }
@@ -97,9 +99,11 @@ const Inference = (function () {
 
         const modelBuffer = await fetchModelBytes(onProgress);
 
-        // EP: WebGPU 優先 → WASM フォールバック
+        // WebGPUはAPIの存在だけでなく、secure contextとadapter取得まで確認する。
         const tryProviders = [];
-        if (navigator.gpu) tryProviders.push(['webgpu']);
+        const webgpu = await detectWebGPU();
+        if (onProgress) onProgress({ phase: 'capability', provider: 'webgpu', ...webgpu });
+        if (webgpu.available) tryProviders.push(['webgpu']);
         tryProviders.push(['wasm']);
 
         let lastErr = null;
@@ -112,14 +116,46 @@ const Inference = (function () {
                 });
                 hasNumTokensInput = session.inputNames.includes('num_tokens');
                 loadedModelKey = currentModelKey;
+                activeProvider = eps[0];
                 console.log('MoGe ONNX session created with EP:', eps[0], 'model:', currentModelKey, 'inputs:', session.inputNames, 'outputs:', session.outputNames);
                 return session;
             } catch (e) {
                 console.warn(`EP ${eps[0]} 失敗:`, e);
+                if (eps[0] === 'webgpu' && onProgress) {
+                    onProgress({
+                        phase: 'fallback',
+                        from: 'webgpu',
+                        to: 'wasm',
+                        reason: e && e.message ? e.message : String(e)
+                    });
+                }
+                session = null;
+                activeProvider = null;
                 lastErr = e;
             }
         }
         throw new Error('ONNX セッション作成に失敗: ' + (lastErr ? lastErr.message : 'unknown'));
+    }
+
+    async function detectWebGPU() {
+        if (!window.isSecureContext) {
+            return { available: false, reason: 'WebGPUにはHTTPSまたはlocalhostが必要です' };
+        }
+        if (!navigator.gpu) {
+            return { available: false, reason: 'このブラウザではWebGPU APIが利用できません' };
+        }
+        try {
+            const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+            if (!adapter) {
+                return { available: false, reason: '利用可能なGPU adapterを取得できませんでした' };
+            }
+            return { available: true, reason: '' };
+        } catch (e) {
+            return {
+                available: false,
+                reason: e && e.message ? e.message : 'GPU adapterの取得に失敗しました'
+            };
+        }
     }
 
     // imageData: ImageData (任意解像度) → NCHW Float32 [1,3,inH,inW]
@@ -203,5 +239,9 @@ const Inference = (function () {
         };
     }
 
-    return { loadModel, run, preprocess, computeInputSize, setModel, MODELS };
+    function getActiveProvider() {
+        return activeProvider;
+    }
+
+    return { loadModel, run, preprocess, computeInputSize, setModel, getActiveProvider, MODELS };
 })();
