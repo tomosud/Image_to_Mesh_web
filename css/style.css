@@ -43,12 +43,30 @@ body {
     background: rgba(0, 0, 0, 0.62);
 }
 
+#repoLink {
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    z-index: 1500;
+    transform: translateX(-50%);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+    text-decoration: none;
+    text-shadow: 0 1px 3px #000;
+}
+
+#repoLink:hover {
+    color: var(--text);
+    text-decoration: underline;
+}
+
 body.ui-hidden #dropZone,
 body.ui-hidden #controls,
 body.ui-hidden #sidePanel,
 body.ui-hidden #info,
 body.ui-hidden #meshInfo,
-body.ui-hidden #captureFrame {
+body.ui-hidden #captureFrame,
+body.ui-hidden #repoLink {
     display: none !important;
 }
 
