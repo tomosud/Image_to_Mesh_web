@@ -143,7 +143,7 @@ const Viewer = (function () {
                 const u = uvs[i * 2];
                 const vv = uvs[i * 2 + 1];
                 const texX = Math.floor(u * (currentColorTexture.width - 1));
-                const texY = Math.floor(vv * (currentColorTexture.height - 1));
+                const texY = Math.floor((1 - vv) * (currentColorTexture.height - 1));
                 const texIndex = (texY * currentColorTexture.width + texX) * 4;
                 colors[i * 3] = currentColorTexture.data[texIndex] / 255;
                 colors[i * 3 + 1] = currentColorTexture.data[texIndex + 1] / 255;
@@ -186,7 +186,7 @@ const Viewer = (function () {
                 THREE.UnsignedByteType
             );
             currentTextureObject.needsUpdate = true;
-            currentTextureObject.flipY = false;
+            currentTextureObject.flipY = true;
         }
         return currentTextureObject;
     }
