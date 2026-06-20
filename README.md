@@ -4,6 +4,12 @@ Image to Mesh Web converts a single JPG or PNG image into an interactive 3D mesh
 
 **[Open Image to Mesh Web](https://tomosud.github.io/Image_to_Mesh_web/)**
 
+
+
+https://github.com/user-attachments/assets/9ee06a21-c0db-4ef7-a144-4e5478724f1f
+
+
+
 ## Features
 
 - Single-image depth and 3D geometry estimation with MoGe-2
