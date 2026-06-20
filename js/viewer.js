@@ -8,6 +8,7 @@ const Viewer = (function () {
     let currentColorTexture = null;   // { data: Uint8Array RGBA, width, height }
     let currentTextureObject = null;  // THREE.DataTexture cache
     let currentBaseName = '';
+    let currentIntrinsics = null;     // normalized { fx, fy, cx, cy }
 
     let isWireframeMode = false;
     let isPointsMode = false;
@@ -74,12 +75,13 @@ const Viewer = (function () {
     // 外部から推論結果を受け取る
     // worldPos: Float32Array(H*W*4) RGBA(=XYZ+1), w/h: WP解像度
     // colorTex: { data: Uint8Array RGBA, width, height } | null
-    function setData(worldPos, w, h, colorTex, baseName) {
+    function setData(worldPos, w, h, colorTex, baseName, intrinsics) {
         init();
         currentWorldPosData = { data: worldPos, width: w, height: h };
         currentColorTexture = colorTex || null;
         currentTextureObject = null; // 再生成
         currentBaseName = baseName || 'mesh';
+        currentIntrinsics = intrinsics || null;
         createMesh(false);
     }
 
@@ -272,17 +274,61 @@ const Viewer = (function () {
 
     function resetCamera() {
         const target = isPointsMode ? pointsMesh : mesh;
-        if (!target) return;
-        const box = new THREE.Box3().setFromObject(target);
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const fov = camera.fov * (Math.PI / 180);
-        let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
-        camera.position.set(center.x + cameraZ * 0.5, center.y + cameraZ * 0.7, center.z + cameraZ);
-        camera.lookAt(center);
-        controls.target.copy(center);
+        if (!target || !currentWorldPosData) return;
+
+        const bounds = calculateBounds(currentWorldPosData.data);
+        if (![bounds.minX, bounds.maxX, bounds.minY, bounds.maxY, bounds.minZ, bounds.maxZ].every(Number.isFinite)) return;
+
+        const center = new THREE.Vector3(
+            (bounds.minX + bounds.maxX) * 0.5,
+            (bounds.minY + bounds.maxY) * 0.5,
+            (bounds.minZ + bounds.maxZ) * 0.5
+        );
+        const size = new THREE.Vector3(
+            bounds.maxX - bounds.minX,
+            bounds.maxY - bounds.minY,
+            bounds.maxZ - bounds.minZ
+        );
+
+        camera.up.set(0, 1, 0);
+        if (hasValidIntrinsics(currentIntrinsics) && bounds.minZ > 0) {
+            // WorldPos flips camera X/Y while preserving Z. Looking from the
+            // estimated camera origin toward +Z therefore reproduces the source
+            // image orientation instead of showing the mesh from its back/side.
+            const sourceVfov = 2 * Math.atan(0.5 / currentIntrinsics.fy);
+            const sourceHfov = 2 * Math.atan(0.5 / currentIntrinsics.fx);
+            const vfovForWidth = 2 * Math.atan(Math.tan(sourceHfov * 0.5) / camera.aspect);
+            camera.fov = THREE.MathUtils.radToDeg(Math.max(sourceVfov, vfovForWidth)) * 1.02;
+            camera.position.set(0, 0, 0);
+            controls.target.set(0, 0, center.z);
+        } else {
+            // Fallback for imported/invalid data: fit the bounds from the same
+            // front side as the source camera, without the previous X/Y offset.
+            camera.fov = 60;
+            const vfov = THREE.MathUtils.degToRad(camera.fov);
+            const hfov = 2 * Math.atan(Math.tan(vfov * 0.5) * camera.aspect);
+            const fitDistance = Math.max(
+                size.y * 0.5 / Math.tan(vfov * 0.5),
+                size.x * 0.5 / Math.tan(hfov * 0.5)
+            ) * 1.1;
+            const distance = Math.max(fitDistance, size.z * 0.5 + Math.max(fitDistance * 0.05, 1e-3));
+            camera.position.set(center.x, center.y, center.z - distance);
+            controls.target.copy(center);
+        }
+
+        const distance = camera.position.distanceTo(controls.target);
+        camera.near = Math.max(1e-4, bounds.minZ > 0 && camera.position.z === 0 ? bounds.minZ * 0.1 : distance * 0.001);
+        camera.far = Math.max(bounds.maxZ + Math.abs(camera.position.z), distance * 10, camera.near * 1000);
+        camera.updateProjectionMatrix();
+        controls.minDistance = Math.max(1e-4, distance * 0.01);
+        controls.maxDistance = Math.max(distance * 100, controls.minDistance * 10);
+        camera.lookAt(controls.target);
         controls.update();
+    }
+
+    function hasValidIntrinsics(value) {
+        return value && Number.isFinite(value.fx) && value.fx > 0 &&
+            Number.isFinite(value.fy) && value.fy > 0;
     }
 
     // ---- 表示モード切替 ----

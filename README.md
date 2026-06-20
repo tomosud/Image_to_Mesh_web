@@ -69,7 +69,7 @@ Disabling it includes the full image but may create unwanted geometry around for
 - Unlit: display image colors without lighting
 - No Color: hide the image texture
 - Wireframe: show the mesh triangles
-- Reset View: restore the camera position
+- Reset View: restore the estimated source-camera view from directly in front of the image
 - Show Capture Frame: show the area used for PNG export
 - UI OFF / UI ON: hide or restore the interface panels
 
@@ -86,6 +86,18 @@ Disabling it includes the full image but may create unwanted geometry around for
 Output file names are based on the source image name.
 
 World Position and OBJ outputs use a Y-up coordinate system intended for Houdini.
+
+## Current Implementation
+
+The browser pipeline is:
+
+1. Run the selected MoGe-2 ONNX model with WebGPU, falling back to WASM when necessary.
+2. Recover focal length and depth shift from the predicted point map, then apply the model's metric scale.
+3. Reproject the result into a camera-space point map and convert it to Y-up world positions.
+4. Remove masked pixels and triangles that cross invalid pixels or large depth discontinuities.
+5. Display the textured mesh or point cloud with three.js.
+
+The initial view and **Reset View** use the focal length estimated during MoGe post-processing. The viewer places the camera at the estimated source-camera origin and looks along the image's +Z axis, so the mesh opens from the same front-facing composition as the input image. If valid camera parameters are unavailable, the viewer falls back to a front-facing bounds fit.
 
 ## Run Locally
 

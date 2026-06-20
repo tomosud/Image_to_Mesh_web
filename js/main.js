@@ -95,7 +95,14 @@
             currentPost.points, currentPost.width, currentPost.height, currentPost.mask, opts
         );
         const colorTex = colorTexFromImageData(currentImageData);
-        Viewer.setData(currentWP.data, currentWP.width, currentWP.height, colorTex, currentBaseName);
+        Viewer.setData(
+            currentWP.data,
+            currentWP.width,
+            currentWP.height,
+            colorTex,
+            currentBaseName,
+            currentPost.intrinsics
+        );
         setDownloadEnabled(true);
     }
 
