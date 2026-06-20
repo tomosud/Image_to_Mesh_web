@@ -9,6 +9,15 @@ const Viewer = (function () {
     let currentTextureObject = null;  // THREE.DataTexture cache
     let currentBaseName = '';
     let currentIntrinsics = null;     // normalized { fx, fy, cx, cy }
+    let raycaster, pointerNdc, selectionMarkers;
+    let orbitPlaneGrid = null;
+    let orbitPlaneUpArrow = null;
+    let orbitPlanePoints = [];
+    let orbitPlaneSelectionActive = false;
+    let orbitPlaneAdjustmentOpen = false;
+    let activeOrbitPlane = null;
+    let pendingOrbitPlane = null;
+    let pointerDownPosition = null;
 
     let isWireframeMode = false;
     let isPointsMode = false;
@@ -39,13 +48,17 @@ const Viewer = (function () {
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setClearColor(0x000000, 0);
 
-        controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.screenSpacePanning = false;
-        controls.minDistance = 0.1;
-        controls.maxDistance = 1000;
-        controls.maxPolarAngle = Math.PI;
+        createOrbitControls(new THREE.Vector3(), false);
+
+        raycaster = new THREE.Raycaster();
+        pointerNdc = new THREE.Vector2();
+        selectionMarkers = new THREE.Group();
+        scene.add(selectionMarkers);
+        canvas.addEventListener('pointerdown', onSelectionPointerDown);
+        canvas.addEventListener('pointerup', onSelectionPointerUp);
+        window.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && orbitPlaneAdjustmentOpen) cancelOrbitPlaneAdjustment(true);
+        });
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.6));
         const d1 = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -87,6 +100,7 @@ const Viewer = (function () {
 
     function createMesh(skipCameraReset) {
         if (!currentWorldPosData) return;
+        cancelOrbitPlaneAdjustment(true);
         const { data: worldPosData, width, height } = currentWorldPosData;
 
         // Geometry cannot contain more detail than the inferred point map.
@@ -133,6 +147,7 @@ const Viewer = (function () {
 
         geometry.attributes.position.needsUpdate = true;
         removeInvalidAndDiscontinuousFaces(geometry, positions);
+        updateFiniteGeometryBounds(geometry, positions);
         geometry.computeVertexNormals();
 
         // 頂点カラー（ポイントモード等で使用）
@@ -175,6 +190,19 @@ const Viewer = (function () {
         if (!skipCameraReset) resetCamera();
     }
 
+    function createOrbitControls(target, frontSideOnly) {
+        if (controls) controls.dispose();
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.screenSpacePanning = false;
+        controls.minDistance = 0.1;
+        controls.maxDistance = 1000;
+        controls.minPolarAngle = frontSideOnly ? 0.001 : 0;
+        controls.maxPolarAngle = frontSideOnly ? Math.PI * 0.5 - 0.001 : Math.PI;
+        controls.target.copy(target);
+    }
+
     // Do not connect masked pixels or surfaces separated by a large depth jump.
     // A regular image-grid mesh otherwise produces long sheets at silhouettes.
     function removeInvalidAndDiscontinuousFaces(geometry, positions) {
@@ -200,6 +228,35 @@ const Viewer = (function () {
         }
 
         geometry.setIndex(kept);
+    }
+
+    // Masked vertices remain NaN so exports and point mode preserve invalid
+    // pixels. three.js cannot derive raycast bounds from such an array, so use
+    // only finite vertices for the mesh bounding volumes.
+    function updateFiniteGeometryBounds(geometry, positions) {
+        const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+        const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+        for (let i = 0; i < positions.length; i += 3) {
+            const x = positions[i], y = positions[i + 1], z = positions[i + 2];
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+            min.x = Math.min(min.x, x); max.x = Math.max(max.x, x);
+            min.y = Math.min(min.y, y); max.y = Math.max(max.y, y);
+            min.z = Math.min(min.z, z); max.z = Math.max(max.z, z);
+        }
+        if (!Number.isFinite(min.x)) return;
+
+        geometry.boundingBox = new THREE.Box3(min, max);
+        const center = min.clone().add(max).multiplyScalar(0.5);
+        let radiusSq = 0;
+        for (let i = 0; i < positions.length; i += 3) {
+            const x = positions[i], y = positions[i + 1], z = positions[i + 2];
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+            radiusSq = Math.max(radiusSq,
+                (x - center.x) * (x - center.x) +
+                (y - center.y) * (y - center.y) +
+                (z - center.z) * (z - center.z));
+        }
+        geometry.boundingSphere = new THREE.Sphere(center, Math.sqrt(radiusSq));
     }
 
     function getTextureObject() {
@@ -290,7 +347,10 @@ const Viewer = (function () {
             bounds.maxZ - bounds.minZ
         );
 
-        camera.up.set(0, 1, 0);
+        cancelOrbitPlaneAdjustment(true);
+        const adjustedPlane = activeOrbitPlane;
+        camera.up.copy(adjustedPlane ? adjustedPlane.normal : new THREE.Vector3(0, 1, 0));
+        createOrbitControls(adjustedPlane ? adjustedPlane.center : new THREE.Vector3(), !!adjustedPlane);
         if (hasValidIntrinsics(currentIntrinsics) && bounds.minZ > 0) {
             // WorldPos flips camera X/Y while preserving Z. Looking from the
             // estimated camera origin toward +Z therefore reproduces the source
@@ -300,7 +360,8 @@ const Viewer = (function () {
             const vfovForWidth = 2 * Math.atan(Math.tan(sourceHfov * 0.5) / camera.aspect);
             camera.fov = THREE.MathUtils.radToDeg(Math.max(sourceVfov, vfovForWidth)) * 1.02;
             camera.position.set(0, 0, 0);
-            controls.target.set(0, 0, center.z);
+            if (adjustedPlane) controls.target.copy(adjustedPlane.center);
+            else controls.target.set(0, 0, center.z);
         } else {
             // Fallback for imported/invalid data: fit the bounds from the same
             // front side as the source camera, without the previous X/Y offset.
@@ -313,7 +374,7 @@ const Viewer = (function () {
             ) * 1.1;
             const distance = Math.max(fitDistance, size.z * 0.5 + Math.max(fitDistance * 0.05, 1e-3));
             camera.position.set(center.x, center.y, center.z - distance);
-            controls.target.copy(center);
+            controls.target.copy(adjustedPlane ? adjustedPlane.center : center);
         }
 
         const distance = camera.position.distanceTo(controls.target);
@@ -329,6 +390,235 @@ const Viewer = (function () {
     function hasValidIntrinsics(value) {
         return value && Number.isFinite(value.fx) && value.fx > 0 &&
             Number.isFinite(value.fy) && value.fy > 0;
+    }
+
+    // ---- 3-point orbit plane calibration ----
+    function toggleHorizontalGridAdjustment() {
+        if (!mesh && !pointsMesh) return;
+        if (orbitPlaneAdjustmentOpen) {
+            cancelOrbitPlaneAdjustment(true);
+            return;
+        }
+
+        orbitPlaneAdjustmentOpen = true;
+        orbitPlaneSelectionActive = true;
+        pendingOrbitPlane = null;
+        orbitPlanePoints = [];
+        clearSelectionMarkers();
+
+        const currentCenter = activeOrbitPlane ? activeOrbitPlane.center : controls.target;
+        const currentNormal = activeOrbitPlane ? activeOrbitPlane.normal : camera.up.clone().normalize();
+        showOrbitPlaneHelper(currentCenter, currentNormal, getSceneDiagonal() * 0.25);
+        renderer.domElement.classList.add('selecting-orbit-plane');
+        updateOrbitPlaneUI('Select 3 points on the horizontal plane (1/3).', true, false);
+    }
+
+    function cancelOrbitPlaneAdjustment(clearVisuals) {
+        orbitPlaneAdjustmentOpen = false;
+        orbitPlaneSelectionActive = false;
+        pendingOrbitPlane = null;
+        orbitPlanePoints = [];
+        pointerDownPosition = null;
+        if (renderer) renderer.domElement.classList.remove('selecting-orbit-plane');
+        if (clearVisuals) {
+            clearSelectionMarkers();
+            clearOrbitPlaneHelper();
+        }
+        updateOrbitPlaneUI('', false, false);
+    }
+
+    function clearSelectionMarkers() {
+        if (!selectionMarkers) return;
+        while (selectionMarkers.children.length) {
+            const marker = selectionMarkers.children[selectionMarkers.children.length - 1];
+            selectionMarkers.remove(marker);
+            if (marker.geometry) marker.geometry.dispose();
+            if (marker.material) marker.material.dispose();
+        }
+    }
+
+    function clearOrbitPlaneHelper() {
+        if (orbitPlaneGrid) {
+            scene.remove(orbitPlaneGrid);
+            orbitPlaneGrid.geometry.dispose();
+            orbitPlaneGrid.material.dispose();
+            orbitPlaneGrid = null;
+        }
+        if (orbitPlaneUpArrow) {
+            scene.remove(orbitPlaneUpArrow);
+            orbitPlaneUpArrow.traverse((child) => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+            orbitPlaneUpArrow = null;
+        }
+    }
+
+    function updateOrbitPlaneUI(message, active, canUse) {
+        const button = document.getElementById('adjustHorizontalGrid');
+        const useButton = document.getElementById('useHorizontalGrid');
+        const help = document.getElementById('orbitPlaneHelp');
+        const status = document.getElementById('orbitPlaneStatus');
+        if (button) {
+            button.textContent = active ? 'Cancel' : 'Adjust Horizontal Grid';
+            button.classList.toggle('active', active);
+        }
+        if (useButton) useButton.classList.toggle('hidden-control', !canUse);
+        if (help) {
+            help.textContent = active ? 'Select 3 well-spaced points on the horizontal plane.' : '';
+            help.classList.toggle('hidden-control', !active);
+        }
+        if (status) status.textContent = message;
+    }
+
+    function onSelectionPointerDown(event) {
+        if (!orbitPlaneSelectionActive || event.button !== 0) return;
+        pointerDownPosition = { x: event.clientX, y: event.clientY };
+    }
+
+    function onSelectionPointerUp(event) {
+        if (!orbitPlaneSelectionActive || event.button !== 0 || !pointerDownPosition) return;
+        const dx = event.clientX - pointerDownPosition.x;
+        const dy = event.clientY - pointerDownPosition.y;
+        pointerDownPosition = null;
+        if (dx * dx + dy * dy > 16) return;
+
+        const target = isPointsMode ? pointsMesh : mesh;
+        if (!target) return;
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointerNdc.set(
+            ((event.clientX - rect.left) / rect.width) * 2 - 1,
+            -((event.clientY - rect.top) / rect.height) * 2 + 1
+        );
+        raycaster.setFromCamera(pointerNdc, camera);
+        if (isPointsMode && currentWorldPosData) {
+            const bounds = calculateBounds(currentWorldPosData.data);
+            const diagonal = Math.hypot(
+                bounds.maxX - bounds.minX,
+                bounds.maxY - bounds.minY,
+                bounds.maxZ - bounds.minZ
+            );
+            raycaster.params.Points.threshold = Math.max(diagonal * 0.005, 1e-4);
+        }
+        const hits = raycaster.intersectObject(target, false);
+        if (!hits.length) {
+            updateOrbitPlaneUI(`No surface at that position (${orbitPlanePoints.length + 1}/3).`, true, false);
+            return;
+        }
+
+        const point = hits[0].point.clone();
+        orbitPlanePoints.push(point);
+        addSelectionMarker(point, orbitPlanePoints.length - 1);
+        if (orbitPlanePoints.length < 3) {
+            updateOrbitPlaneUI(`Select a point on the horizontal plane (${orbitPlanePoints.length + 1}/3).`, true, false);
+            return;
+        }
+        previewOrbitPlane();
+    }
+
+    function addSelectionMarker(point, index) {
+        const bounds = calculateBounds(currentWorldPosData.data);
+        const diagonal = Math.hypot(
+            bounds.maxX - bounds.minX,
+            bounds.maxY - bounds.minY,
+            bounds.maxZ - bounds.minZ
+        );
+        const geometry = new THREE.SphereGeometry(Math.max(diagonal * 0.008, 1e-4), 16, 12);
+        const colors = [0xff5c5c, 0x63e67b, 0x66a3ff];
+        const material = new THREE.MeshBasicMaterial({ color: colors[index], depthTest: false });
+        const marker = new THREE.Mesh(geometry, material);
+        marker.position.copy(point);
+        marker.renderOrder = 1000;
+        selectionMarkers.add(marker);
+    }
+
+    function previewOrbitPlane() {
+        const p0 = orbitPlanePoints[0], p1 = orbitPlanePoints[1], p2 = orbitPlanePoints[2];
+        const edge1 = new THREE.Vector3().subVectors(p1, p0);
+        const edge2 = new THREE.Vector3().subVectors(p2, p0);
+        const edge3 = new THREE.Vector3().subVectors(p2, p1);
+        const normal = new THREE.Vector3().crossVectors(edge1, edge2);
+        const maxEdge = Math.max(edge1.length(), edge2.length(), edge3.length());
+
+        if (!(maxEdge > 0) || normal.length() < maxEdge * maxEdge * 1e-4) {
+            clearSelectionMarkers();
+            orbitPlanePoints = [];
+            updateOrbitPlaneUI('The points are nearly collinear. Select 3 wider-spaced points.', true, false);
+            return;
+        }
+
+        normal.normalize();
+        const center = p0.clone().add(p1).add(p2).multiplyScalar(1 / 3);
+        const frontReference = hasValidIntrinsics(currentIntrinsics)
+            ? center.clone().negate()
+            : camera.position.clone().sub(center);
+        // Point order only changes the sign. Prefer the estimated source-camera
+        // side so Reset View always returns to the selected plane's front side.
+        if (normal.dot(frontReference) < 0) normal.negate();
+
+        pendingOrbitPlane = { center: center.clone(), normal: normal.clone(), size: maxEdge };
+        showOrbitPlaneHelper(center, normal, maxEdge);
+
+        orbitPlaneSelectionActive = false;
+        orbitPlanePoints = [];
+        renderer.domElement.classList.remove('selecting-orbit-plane');
+        updateOrbitPlaneUI('Review the preview grid, then use or cancel it.', true, true);
+    }
+
+    function useHorizontalGrid() {
+        if (!pendingOrbitPlane) return;
+        activeOrbitPlane = {
+            center: pendingOrbitPlane.center.clone(),
+            normal: pendingOrbitPlane.normal.clone()
+        };
+
+        const cameraOffset = camera.position.clone().sub(activeOrbitPlane.center);
+        const side = cameraOffset.dot(activeOrbitPlane.normal);
+        if (side < 0) {
+            cameraOffset.addScaledVector(activeOrbitPlane.normal, -2 * side);
+            camera.position.copy(activeOrbitPlane.center).add(cameraOffset);
+        }
+        camera.up.copy(activeOrbitPlane.normal);
+        // OrbitControls r128 caches the up-axis transform at construction.
+        createOrbitControls(activeOrbitPlane.center, true);
+        camera.lookAt(activeOrbitPlane.center);
+        controls.update();
+        cancelOrbitPlaneAdjustment(true);
+    }
+
+    function showOrbitPlaneHelper(center, normal, selectedSize) {
+        clearOrbitPlaneHelper();
+        const bounds = calculateBounds(currentWorldPosData.data);
+        const sceneDiagonal = Math.hypot(
+            bounds.maxX - bounds.minX,
+            bounds.maxY - bounds.minY,
+            bounds.maxZ - bounds.minZ
+        );
+        const size = Math.max(selectedSize * 2, sceneDiagonal * 0.25, 1e-3);
+        const offset = Math.max(sceneDiagonal * 0.001, 1e-5);
+        const helperCenter = center.clone().addScaledVector(normal, offset);
+
+        orbitPlaneGrid = new THREE.GridHelper(size, 20, 0xffd54f, 0x6f7890);
+        orbitPlaneGrid.position.copy(helperCenter);
+        orbitPlaneGrid.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+        orbitPlaneGrid.material.transparent = true;
+        orbitPlaneGrid.material.opacity = 0.7;
+        orbitPlaneGrid.renderOrder = 900;
+        scene.add(orbitPlaneGrid);
+
+        orbitPlaneUpArrow = new THREE.ArrowHelper(normal, helperCenter, size * 0.3, 0xffd54f, size * 0.06, size * 0.035);
+        orbitPlaneUpArrow.renderOrder = 901;
+        scene.add(orbitPlaneUpArrow);
+    }
+
+    function getSceneDiagonal() {
+        if (!currentWorldPosData) return 1;
+        const bounds = calculateBounds(currentWorldPosData.data);
+        return Math.hypot(
+            bounds.maxX - bounds.minX,
+            bounds.maxY - bounds.minY,
+            bounds.maxZ - bounds.minZ
+        );
     }
 
     // ---- 表示モード切替 ----
@@ -413,6 +703,7 @@ const Viewer = (function () {
 
     return {
         init, setData, resetCamera,
+        toggleHorizontalGridAdjustment, useHorizontalGrid,
         setPointsMode, setPointSize, toggleWireframe,
         setLighting, setColorDisabled, isPoints,
         exportOBJ, exportPNG

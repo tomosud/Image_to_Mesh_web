@@ -229,6 +229,8 @@
         });
         $('disableColor').addEventListener('change', (e) => Viewer.setColorDisabled(e.target.checked));
         $('resetView').addEventListener('click', Viewer.resetCamera);
+        $('adjustHorizontalGrid').addEventListener('click', Viewer.toggleHorizontalGridAdjustment);
+        $('useHorizontalGrid').addEventListener('click', Viewer.useHorizontalGrid);
 
         $('showCaptureFrame').addEventListener('change', (e) => {
             const f = $('captureFrame');

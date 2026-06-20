@@ -70,6 +70,7 @@ Disabling it includes the full image but may create unwanted geometry around for
 - No Color: hide the image texture
 - Wireframe: show the mesh triangles
 - Reset View: restore the estimated source-camera view from directly in front of the image
+- Adjust Horizontal Grid: preview the current orbit plane, then click 3 points to define a new horizontal plane and center
 - Show Capture Frame: show the area used for PNG export
 - UI OFF / UI ON: hide or restore the interface panels
 
@@ -98,6 +99,8 @@ The browser pipeline is:
 5. Display the textured mesh or point cloud with three.js.
 
 The initial view and **Reset View** use the focal length estimated during MoGe post-processing. The viewer places the camera at the estimated source-camera origin and looks along the image's +Z axis, so the mesh opens from the same front-facing composition as the input image. If valid camera parameters are unavailable, the viewer falls back to a front-facing bounds fit.
+
+For tabletop or other tilted-camera images, click **Adjust Horizontal Grid**. The current orbit plane first appears as a grid and the three-point instructions become visible. Select three well-spaced points on one surface to preview a new grid, then click **Use This Grid** to commit it or **Cancel** to discard it. The centroid becomes the orbit center and the plane normal becomes the up axis; point order does not matter. The committed grid disappears, but its center and up axis remain active. **Reset View** keeps this calibration and rebuilds the view from the estimated source-camera position.
 
 ## Run Locally
 
