@@ -274,7 +274,9 @@
                 recompute();
             }
         });
-        $('loadAnother').addEventListener('click', () => $('fileInput').click());
+        // A full reload reliably releases ONNX/WebGPU resources and large typed
+        // arrays before processing the next image. Model bytes remain cached.
+        $('loadAnother').addEventListener('click', () => window.location.reload());
 
         // ダウンロード
         $('dlImage').addEventListener('click', () => Downloader.saveOriginal(currentFile));

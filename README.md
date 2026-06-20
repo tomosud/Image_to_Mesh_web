@@ -28,7 +28,7 @@ Large models may fail to load if the device or browser does not have enough avai
 4. Change the settings as needed and click **Recompute**.
 5. Download the depth map, world position map, OBJ mesh, or rendered image.
 
-To process another image, click **Another Image** or drop a new image onto the page.
+To process another image, click **Another Image**. The page reloads to release ONNX, WebGPU, mesh, and image memory before the next run; cached model bytes and the selected model preference are retained.
 
 ## Inference Settings
 
