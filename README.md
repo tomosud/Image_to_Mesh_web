@@ -1,167 +1,203 @@
 # Image to Mesh Web
 
-Image to Mesh Web uses MoGe-2 to estimate depth and 3D geometry from a single image and displays the result as an interactive mesh in your browser.
-
-Images and inference results are processed locally in the browser. The selected model is downloaded on first use and stored in the browser cache.
+Image to Mesh Web converts a single JPG or PNG image into an interactive 3D mesh using MoGe-2. Inference, geometry processing, viewing, and export run locally in your browser.
 
 **[Open Image to Mesh Web](https://tomosud.github.io/Image_to_Mesh_web/)**
 
-Model: [microsoft/MoGe](https://github.com/microsoft/moge)
+## Features
+
+- Single-image depth and 3D geometry estimation with MoGe-2
+- ViT-S, ViT-B, and ViT-L model choices
+- WebGPU inference with automatic WASM fallback
+- Textured mesh, point-cloud, wireframe, and unlit display modes
+- Estimated source-camera view
+- Three-point horizontal-plane and orbit-center adjustment
+- Adjustable masking and depth-edge cleanup
+- Depth EXR, aligned World Position EXR, OBJ, GLB, and PNG export
+- Local browser processing; input images are not uploaded
 
 ## Requirements
 
-- The latest version of Google Chrome or Microsoft Edge
+- Current Google Chrome or Microsoft Edge
 - A WebGPU-capable GPU is recommended
-- An internet connection for the initial model and library downloads
-- A JPG or PNG image
+- Internet access for the first model and library download
+- A JPG or PNG input image
 
-Large models may fail to load if the device or browser does not have enough available memory.
+ViT-L requires substantial GPU and system memory. Use ViT-B or ViT-S if loading or inference fails.
 
-## Usage
+## Quick Start
 
-1. Drop a JPG or PNG image onto the page, or click the drop area to select a file.
-2. Wait for the model to load and inference to finish. The first run may take longer because the model must be downloaded.
-3. Inspect the mesh with the mouse:
+1. Drop a JPG or PNG onto the page, or click the drop area.
+2. Wait for the model download and inference to finish.
+3. Inspect the geometry:
+
    - Left drag: rotate
    - Mouse wheel: zoom
    - Right drag: pan
-4. Change the settings as needed and click **Recompute**.
-5. Download the depth map, world position map, OBJ mesh, or rendered image.
 
-To process another image, click **Another Image**. The page reloads to release ONNX, WebGPU, mesh, and image memory before the next run; cached model bytes and the selected model preference are retained.
+4. Adjust the model, quality, scale, mask, or edge settings as needed.
+5. Use the download buttons to export geometry or maps.
 
-## Inference Settings
+The first run is slower because the selected model must be downloaded. Model files are stored in the browser cache for later sessions.
+
+To process a different image, click **Another Image**. The page reloads to release ONNX, WebGPU, mesh, and image memory. The selected model and cached model file are retained.
+
+## Horizontal Grid and Camera Rotation
+
+The initial camera uses the focal length estimated by MoGe-2 and opens from the input image's front-facing composition.
+
+For tabletop scenes or images shot from above, the default image-up axis may not match the scene's real horizontal plane. Use **Adjust Horizontal Grid** to define it manually:
+
+1. Click **Adjust Horizontal Grid**. The current horizontal grid appears.
+2. Select three well-spaced points on the same horizontal surface.
+3. Check the preview grid and yellow up/front arrow.
+4. Click **Use This Grid** to apply it, or **Cancel** to discard it.
+
+The order of the three points does not matter. Their center becomes the orbit center, and the plane normal becomes the new up axis. After confirmation, the grid disappears but the calibration remains active.
+
+**Reset View** restores the estimated source-camera position and original image-center target while retaining the adjusted horizontal rotation axis.
+
+## Inference and Geometry Settings
 
 ### Model
 
-| Model | Description | Approximate size |
+| Model | Recommended use | Approximate size |
 |---|---|---:|
-| ViT-S | Fastest and uses the least memory | 150 MB |
-| ViT-B | Balanced speed and quality; selected by default | 400 MB |
+| ViT-S | Lowest memory use and fastest loading | 150 MB |
+| ViT-B | Balanced quality and memory use; default | 400 MB |
 | ViT-L | Highest quality; WebGPU and ample memory recommended | 1.32 GB |
 
-After changing the model, click **Recompute** to load it and run inference again.
-
-The model used for a successful inference is saved in the browser and automatically selected on the next visit. The active execution provider, **WebGPU** or **WASM**, is shown in the upper-left information panel.
+Changing the model requires **Recompute** and runs inference again. The last successfully used model is restored on the next visit.
 
 ### Quality (`num_tokens`)
 
-Higher values can preserve finer details but require more processing time and memory.
+Controls the internal inference resolution.
 
-- Range: 1200–2500
-- Default: 1800
-- If inference fails, reduce this value or select a smaller model
+- Range: `1200`–`2500`
+- Default: `1800`
+- Higher values can preserve more detail but need more time and memory
+- Changing this setting requires **Recompute** and runs inference again
 
 ### Scale
 
-Changes the overall size of the generated 3D geometry. It does not change the relative shape or depth relationships.
-
-### Apply Mask
-
-Removes the background, sky, and uncertain regions from the mesh. Keep this enabled for most images.
-
-Disabling it includes the full image but may create unwanted geometry around foreground boundaries.
+Changes the overall size of the generated geometry without changing its relative shape. Click **Recompute** after changing Scale. Model inference is not repeated.
 
 ### Edge Threshold
 
-Removes vertices on both sides of sharp depth discontinuities before creating the point cloud or mesh. This follows the edge-cleanup stage used by MoGe's official mesh export.
+Controls removal of vertices and faces around sharp depth discontinuities.
 
 - Range: `0.005`–`1.000`
 - Default: `0.970`
-- Smaller values remove more depth-edge vertices
-- Larger values preserve more geometry but may leave stretched boundary artifacts
-- `1.000` (`Off`) disables both vertex and face depth-edge cleanup
-- To disable all optional removal, also turn off **Apply Mask**; invalid/non-positive depths still cannot form geometry
+- Lower values remove more depth-edge geometry
+- Higher values preserve more geometry but may leave stretched surfaces
+- `1.000` displays as `Off` and disables all depth-edge cleanup
 
-Changing this value only requires **Recompute**; model inference is not repeated.
+The setting is applied automatically when the slider is released. Model inference is not repeated.
 
-## Display Settings
+If geometry is missing around object boundaries, raise the value. If long stretched surfaces appear between foreground and background, lower it.
 
-- Points Only: display the geometry as a point cloud
-- Point Size: change the point size in point-cloud mode
-- Unlit: display image colors without lighting
-- No Color: hide the image texture
-- Wireframe: show the mesh triangles
-- Reset View: restore the estimated source-camera view from directly in front of the image
-- Adjust Horizontal Grid: preview the current orbit plane, then click 3 points to define a new horizontal plane and center
-- Show Capture Frame: show the area used for PNG export
-- UI OFF / UI ON: hide or restore the interface panels
+### Apply Mask
+
+Uses MoGe-2's validity mask to remove background, sky, and uncertain regions. Changes are applied immediately without rerunning inference.
+
+To preserve as much geometry as possible, set **Edge Threshold** to `Off` and disable **Apply Mask**. Invalid or non-positive depth values still cannot form geometry.
+
+## Display Controls
+
+- **Points Only**: switch between triangle mesh and point cloud
+- **Point Size**: set point size in screen pixels
+- **Unlit**: show image colors without scene lighting
+- **No Color**: hide the source-image color
+- **Wireframe**: show mesh triangle edges
+- **Reset View**: restore the estimated source-camera view
+- **Adjust Horizontal Grid**: set the scene's horizontal axis and orbit center from three points
+- **Show Capture Frame**: preview the square PNG export region
+- **UI OFF / UI ON**: hide or restore interface panels
 
 ## Downloads
 
 | Button | Output |
 |---|---|
-| Original | The source JPG or PNG file |
-| Depth (EXR) | FLOAT depth data in the `Y` channel |
-| Aligned WorldPos (EXR) | FLOAT world positions with `R=X`, `G=Y`, and `B=Z`, transformed to the committed horizontal grid |
-| OBJ | Triangle mesh with UV coordinates; aligned to the committed horizontal grid when available |
-| Scene GLB | Aligned textured mesh with `EstimatedSourceCamera` and `CurrentViewCamera` |
-| PNG (2048) | The current view rendered at 2048×2048 |
+| Original | Original JPG or PNG file |
+| Depth (EXR) | 32-bit FLOAT camera depth in the `Y` channel |
+| Aligned WorldPos (EXR) | 32-bit FLOAT positions with `R=X`, `G=Y`, and `B=Z` |
+| OBJ | Triangle mesh with UV coordinates |
+| Scene GLB | Textured mesh with estimated source and current viewer cameras |
+| PNG (2048) | Current view rendered to a transparent 2048×2048 PNG |
 
-Output file names are based on the source image name.
+When a horizontal grid is confirmed, Aligned WorldPos EXR, OBJ, and Scene GLB use that coordinate system:
 
-World Position and OBJ outputs use a Y-up coordinate system intended for Houdini.
+- Three-point center: origin
+- Selected plane: `Y=0`
+- Selected up direction: `+Y`
 
-When a horizontal grid has been committed, OBJ, Aligned WorldPos EXR, and Scene GLB place the selected three-point center at the origin and rotate the selected plane normal to `+Y`, making the selected grid plane `Y=0`. Scene GLB contains a compact valid-face mesh, the source image texture, the estimated source camera, and the current viewer camera. Depth EXR remains in the original camera-depth coordinate system.
+Scene GLB contains:
 
-## Current Implementation
+- `AlignedMesh`
+- `EstimatedSourceCamera`
+- `CurrentViewCamera`
+- Source-image texture
 
-The browser pipeline is:
+Depth EXR remains in the original camera-depth coordinate system.
 
-1. Run the selected MoGe-2 ONNX model with WebGPU, falling back to WASM when necessary.
-2. Recover focal length and depth shift from the predicted point map, then apply the model's metric scale.
-3. Reproject the result into a camera-space point map and convert it to Y-up world positions.
-4. Remove masked pixels and triangles that cross invalid pixels or large depth discontinuities.
-5. Display the textured mesh or point cloud with three.js.
+## Troubleshooting
 
-The initial view and **Reset View** use the focal length estimated during MoGe post-processing. The viewer places the camera at the estimated source-camera origin and looks along the image's +Z axis, so the mesh opens from the same front-facing composition as the input image. If valid camera parameters are unavailable, the viewer falls back to a front-facing bounds fit.
+### The model does not load
 
-For tabletop or other tilted-camera images, click **Adjust Horizontal Grid**. The current orbit plane first appears as a grid and the three-point instructions become visible. Select three well-spaced points on one surface to preview a new grid, then click **Use This Grid** to commit it or **Cancel** to discard it. The centroid becomes the orbit center and the plane normal becomes the up axis; point order does not matter. The committed grid disappears, but its calibration remains active. **Reset View** keeps the adjusted up axis while restoring the original image-center target and estimated source-camera position.
+- Update Chrome or Edge.
+- Close other GPU-heavy tabs and applications.
+- Select ViT-S or ViT-B.
+- Reload the page and try again.
+
+### Inference stops or does not return
+
+- Reduce Quality (`num_tokens`).
+- Select a smaller model.
+- Reduce the source-image resolution.
+- Click **Another Image** between images so the page can release GPU and inference memory.
+
+### Long surfaces stretch across depth boundaries
+
+- Lower **Edge Threshold**.
+- Enable **Apply Mask**.
+- Increase Quality if memory permits.
+
+### Too much geometry is missing
+
+- Raise **Edge Threshold**.
+- Set Edge Threshold to `Off` for no depth-edge cleanup.
+- Disable **Apply Mask** if the predicted validity mask removes useful areas.
+
+### Rotation feels tilted or uses the wrong axis
+
+Use **Adjust Horizontal Grid** and select three points on a real horizontal surface such as a floor, table, or plate.
+
+### Shape or distance is inaccurate
+
+Single-image geometry is inherently ambiguous. Transparent objects, mirrors, thin structures, textureless surfaces, strong blur, and extreme wide-angle images may produce inaccurate results.
 
 ## Run Locally
 
-Use a local HTTP server instead of opening the page directly through `file://`.
+Use a local HTTP server instead of opening `index.html` through `file://`.
 
-On Windows, if Python is installed, run `run.bat` to start the server and open `http://localhost:8000/`.
+On Windows, run `run.bat`, then open:
 
-To start it manually:
+```text
+http://localhost:8000/
+```
+
+Or start a server manually:
 
 ```powershell
 cd Image_to_Mesh_web
 python -m http.server 8000
 ```
 
-Then open the following URL in Chrome or Edge:
-
-```text
-http://localhost:8000/
-```
-
 Press `Ctrl+C` in the server terminal to stop it.
 
-## Troubleshooting
+## Privacy
 
-### The model fails to load
-
-- Update Chrome or Edge to the latest version.
-- Close other tabs and applications to free memory.
-- Select ViT-S or ViT-B.
-- If the browser cache was cleared, the model must be downloaded again.
-
-### Inference stops or fails
-
-- Reduce `num_tokens`.
-- Select a smaller model.
-- Reduce the source image resolution.
-
-### Unwanted faces appear in the background
-
-- Enable **Apply Mask**.
-- Use an image with a clear boundary between the subject and background.
-
-### Shape or distance is inaccurate
-
-Single-image 3D estimation is inherently ambiguous. Transparent objects, mirrors, thin structures, textureless surfaces, strong blur, and extreme wide-angle images may produce larger errors.
+Input images and generated geometry remain in the browser. Network access is used to load application libraries and download the selected model. Exported files are generated locally.
 
 ## License
 
