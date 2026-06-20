@@ -13,7 +13,7 @@ Image to Mesh Web converts a single JPG or PNG image into an interactive 3D mesh
 - Estimated source-camera view
 - Three-point horizontal-plane and orbit-center adjustment
 - Adjustable masking and depth-edge cleanup
-- Depth EXR, aligned World Position EXR, OBJ, GLB, and PNG export
+- Depth EXR, tangent-space normal map PNG, aligned World Position EXR, OBJ, GLB, and PNG export
 - Local browser processing; input images are not uploaded
 
 ## Requirements
@@ -120,6 +120,7 @@ To preserve as much geometry as possible, set **Edge Threshold** to `Off` and di
 |---|---|
 | Original | Original JPG or PNG file |
 | Depth (EXR) | 32-bit FLOAT camera depth in the `Y` channel |
+| Normal Map (PNG) | RGB tangent-space normal map generated from MoGe-2 normals |
 | Aligned WorldPos (EXR) | 32-bit FLOAT positions with `R=X`, `G=Y`, and `B=Z` |
 | OBJ | Triangle mesh with UV coordinates |
 | Scene GLB | Textured mesh with estimated source and current viewer cameras |
@@ -136,7 +137,7 @@ Scene GLB contains:
 - `AlignedMesh`
 - `EstimatedSourceCamera`
 - `CurrentViewCamera`
-- Source-image texture
+- Source-image texture and tangent-space normal map
 
 Depth EXR remains in the original camera-depth coordinate system.
 

@@ -7,6 +7,8 @@ const Viewer = (function () {
     let currentWorldPosData = null;   // { data: Float32Array(H*W*4) RGBA=XYZ+1, width, height }
     let currentColorTexture = null;   // { data: Uint8Array RGBA, width, height }
     let currentTextureObject = null;  // THREE.DataTexture cache
+    let currentNormalTexture = null;  // { data: Uint8Array RGBA, width, height }
+    let currentNormalTextureObject = null;
     let currentBaseName = '';
     let currentIntrinsics = null;     // normalized { fx, fy, cx, cy }
     let currentViewerOptions = {};
@@ -91,11 +93,15 @@ const Viewer = (function () {
     // 外部から推論結果を受け取る
     // worldPos: Float32Array(H*W*4) RGBA(=XYZ+1), w/h: WP解像度
     // colorTex: { data: Uint8Array RGBA, width, height } | null
-    function setData(worldPos, w, h, colorTex, baseName, intrinsics, viewerOptions) {
+    function setData(worldPos, w, h, colorTex, baseName, intrinsics, viewerOptions, normalTex) {
         init();
         currentWorldPosData = { data: worldPos, width: w, height: h };
         currentColorTexture = colorTex || null;
-        currentTextureObject = null; // 再生成
+        if (currentTextureObject) currentTextureObject.dispose();
+        if (currentNormalTextureObject) currentNormalTextureObject.dispose();
+        currentTextureObject = null;
+        currentNormalTexture = normalTex || null;
+        currentNormalTextureObject = null;
         currentBaseName = baseName || 'mesh';
         currentIntrinsics = intrinsics || null;
         currentViewerOptions = viewerOptions || {};
@@ -303,14 +309,37 @@ const Viewer = (function () {
         return currentTextureObject;
     }
 
+    function getNormalTextureObject() {
+        if (!currentNormalTexture) return null;
+        if (!currentNormalTextureObject) {
+            currentNormalTextureObject = new THREE.DataTexture(
+                currentNormalTexture.data,
+                currentNormalTexture.width,
+                currentNormalTexture.height,
+                THREE.RGBAFormat,
+                THREE.UnsignedByteType
+            );
+            currentNormalTextureObject.needsUpdate = true;
+            currentNormalTextureObject.flipY = true;
+            currentNormalTextureObject.magFilter = THREE.LinearFilter;
+            currentNormalTextureObject.minFilter = THREE.LinearFilter;
+            currentNormalTextureObject.generateMipmaps = false;
+            currentNormalTextureObject.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        }
+        return currentNormalTextureObject;
+    }
+
     function createMaterial() {
         const MaterialClass = disableLighting ? THREE.MeshBasicMaterial : THREE.MeshStandardMaterial;
+        const lightingOptions = !disableLighting && currentNormalTexture
+            ? { normalMap: getNormalTextureObject() }
+            : {};
         if (disableColor) {
-            return new MaterialClass({ color: 0xffffff, side: THREE.DoubleSide, flatShading: false });
+            return new MaterialClass({ color: 0xffffff, side: THREE.DoubleSide, flatShading: false, ...lightingOptions });
         } else if (currentColorTexture) {
-            return new MaterialClass({ map: getTextureObject(), side: THREE.DoubleSide, flatShading: false });
+            return new MaterialClass({ map: getTextureObject(), side: THREE.DoubleSide, flatShading: false, ...lightingOptions });
         }
-        return new MaterialClass({ color: 0x888888, side: THREE.DoubleSide, flatShading: false });
+        return new MaterialClass({ color: 0x888888, side: THREE.DoubleSide, flatShading: false, ...lightingOptions });
     }
 
     function createPointsMaterial() {
@@ -764,10 +793,12 @@ const Viewer = (function () {
             return;
         }
 
-        const exportTexture = createGLBTexture();
-        const exportMaterial = new THREE.MeshBasicMaterial({
+        const exportTexture = createGLBTexture(currentColorTexture, true);
+        const exportNormalTexture = createGLBTexture(currentNormalTexture, false);
+        const exportMaterial = new THREE.MeshStandardMaterial({
             color: 0xffffff,
             map: exportTexture,
+            normalMap: exportNormalTexture,
             side: THREE.DoubleSide
         });
         const exportMesh = new THREE.Mesh(exportGeometry, exportMaterial);
@@ -780,6 +811,7 @@ const Viewer = (function () {
             exportGeometry.dispose();
             exportMaterial.dispose();
             if (exportTexture) exportTexture.dispose();
+            if (exportNormalTexture) exportNormalTexture.dispose();
         };
         try {
             exporter.parse(exportScene, (result) => {
@@ -835,16 +867,17 @@ const Viewer = (function () {
         return geometry;
     }
 
-    function createGLBTexture() {
-        if (!currentColorTexture) return null;
+    function createGLBTexture(source, isColor) {
+        if (!source) return null;
         const canvas = document.createElement('canvas');
-        canvas.width = currentColorTexture.width;
-        canvas.height = currentColorTexture.height;
+        canvas.width = source.width;
+        canvas.height = source.height;
         const context = canvas.getContext('2d');
-        const pixels = new Uint8ClampedArray(currentColorTexture.data);
+        const pixels = new Uint8ClampedArray(source.data);
         context.putImageData(new ImageData(pixels, canvas.width, canvas.height), 0, 0);
         const texture = new THREE.CanvasTexture(canvas);
         texture.flipY = true;
+        if (isColor) texture.encoding = THREE.sRGBEncoding;
         texture.needsUpdate = true;
         return texture;
     }

@@ -29,5 +29,21 @@ const Downloader = (function () {
         saveBlob(blob, `${baseName}${suffix}`);
     }
 
-    return { saveBlob, saveOriginal, saveDepthEXR, saveWorldPosEXR };
+    function saveNormalPNG(normalMap, baseName) {
+        if (!normalMap) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = normalMap.width;
+        canvas.height = normalMap.height;
+        const context = canvas.getContext('2d');
+        context.putImageData(
+            new ImageData(new Uint8ClampedArray(normalMap.data), normalMap.width, normalMap.height),
+            0,
+            0
+        );
+        canvas.toBlob((blob) => {
+            if (blob) saveBlob(blob, `${baseName}_normal.png`);
+        }, 'image/png');
+    }
+
+    return { saveBlob, saveOriginal, saveDepthEXR, saveWorldPosEXR, saveNormalPNG };
 })();

@@ -8,6 +8,7 @@
     let currentPost = null;        // 後処理結果 { points, depth, mask, intrinsics, width, height }
     let currentWP = null;          // { data, width, height } (モデル解像度)
     let currentBaseName = 'mesh';
+    let currentNormalMap = null;   // tangent-space RGBA8 normal map
     let modelReady = false;
     let lastNumTokens = 1800;
     let currentModelKey = 'vitb';
@@ -41,7 +42,7 @@
     }
 
     function setDownloadEnabled(on) {
-        ['dlImage', 'dlDepth', 'dlWorldPos', 'exportOBJ', 'exportGLB', 'exportPNG', 'recompute'].forEach(id => {
+        ['dlImage', 'dlDepth', 'dlNormal', 'dlWorldPos', 'exportOBJ', 'exportGLB', 'exportPNG', 'recompute'].forEach(id => {
             $(id).disabled = !on;
         });
     }
@@ -108,6 +109,13 @@
             cleanedMask,
             { scale: opts.scale, applyMask: true }
         );
+        currentNormalMap = NormalMap.create(
+            currentPost.normal,
+            currentPost.points,
+            currentPost.width,
+            currentPost.height,
+            cleanedMask
+        );
         const colorTex = colorTexFromImageData(currentImageData);
         Viewer.setData(
             currentWP.data,
@@ -116,7 +124,8 @@
             colorTex,
             currentBaseName,
             currentPost.intrinsics,
-            { disableDepthEdgeCleanup: opts.edgeThreshold >= 1 }
+            { disableDepthEdgeCleanup: opts.edgeThreshold >= 1 },
+            currentNormalMap
         );
         setDownloadEnabled(true);
     }
@@ -283,6 +292,9 @@
         $('dlDepth').addEventListener('click', () => {
             if (!currentPost) return;
             Downloader.saveDepthEXR(currentPost.depth, currentPost.width, currentPost.height, currentBaseName);
+        });
+        $('dlNormal').addEventListener('click', () => {
+            Downloader.saveNormalPNG(currentNormalMap, currentBaseName);
         });
         $('dlWorldPos').addEventListener('click', () => {
             if (!currentWP) return;
