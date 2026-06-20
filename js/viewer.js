@@ -169,15 +169,21 @@ const Viewer = (function () {
         if (currentColorTexture && !disableColor) {
             const colors = new Float32Array(positions.length);
             const uvs = geometry.attributes.uv.array;
+            const linearColor = new THREE.Color();
             for (let i = 0; i < uvs.length / 2; i++) {
                 const u = uvs[i * 2];
                 const vv = uvs[i * 2 + 1];
                 const texX = Math.min(currentColorTexture.width - 1, Math.floor(u * currentColorTexture.width));
                 const texY = Math.min(currentColorTexture.height - 1, Math.floor((1 - vv) * currentColorTexture.height));
                 const texIndex = (texY * currentColorTexture.width + texX) * 4;
-                colors[i * 3] = currentColorTexture.data[texIndex] / 255;
-                colors[i * 3 + 1] = currentColorTexture.data[texIndex + 1] / 255;
-                colors[i * 3 + 2] = currentColorTexture.data[texIndex + 2] / 255;
+                linearColor.setRGB(
+                    currentColorTexture.data[texIndex] / 255,
+                    currentColorTexture.data[texIndex + 1] / 255,
+                    currentColorTexture.data[texIndex + 2] / 255
+                ).convertSRGBToLinear();
+                colors[i * 3] = linearColor.r;
+                colors[i * 3 + 1] = linearColor.g;
+                colors[i * 3 + 2] = linearColor.b;
             }
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
         }
