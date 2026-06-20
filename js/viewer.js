@@ -49,6 +49,7 @@ const Viewer = (function () {
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setClearColor(0x000000, 0);
+        renderer.outputEncoding = THREE.sRGBEncoding;
 
         createOrbitControls(new THREE.Vector3(), false);
 
@@ -287,6 +288,11 @@ const Viewer = (function () {
             );
             currentTextureObject.needsUpdate = true;
             currentTextureObject.flipY = true;
+            currentTextureObject.magFilter = THREE.LinearFilter;
+            currentTextureObject.minFilter = THREE.LinearFilter;
+            currentTextureObject.generateMipmaps = false;
+            currentTextureObject.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            currentTextureObject.encoding = THREE.sRGBEncoding;
         }
         return currentTextureObject;
     }
@@ -306,8 +312,7 @@ const Viewer = (function () {
         if (disableColor) {
             return new THREE.PointsMaterial({ color: 0xffffff, size: adjustedSize, sizeAttenuation: false, vertexColors: false });
         } else if (currentColorTexture) {
-            const tex = getTextureObject();
-            if (tex) { tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.needsUpdate = true; }
+            getTextureObject();
             return new THREE.PointsMaterial({ size: adjustedSize, sizeAttenuation: false, vertexColors: true });
         }
         return new THREE.PointsMaterial({ color: 0x888888, size: adjustedSize, sizeAttenuation: false, vertexColors: false });
@@ -882,6 +887,7 @@ const Viewer = (function () {
         exportRenderer.setSize(exportSize, exportSize, false);
         exportRenderer.setPixelRatio(1);
         exportRenderer.setClearColor(0x000000, 0);
+        exportRenderer.outputEncoding = THREE.sRGBEncoding;
         camera.aspect = 1.0;
         camera.updateProjectionMatrix();
         exportRenderer.render(scene, camera);
