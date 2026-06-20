@@ -35,7 +35,7 @@ ViT-L requires substantial GPU and system memory. Use ViT-B or ViT-S if loading 
    - Mouse wheel: zoom
    - Right drag: pan
 
-4. Adjust the model, quality, scale, mask, or edge settings as needed.
+4. Adjust the model, quality, mask, or edge settings as needed.
 5. Use the download buttons to export geometry or maps.
 
 The first run is slower because the selected model must be downloaded. Model files are stored in the browser cache for later sessions.
@@ -77,10 +77,6 @@ Controls the internal inference resolution.
 - Default: `1800`
 - Higher values can preserve more detail but need more time and memory
 - Changing this setting requires **Recompute** and runs inference again
-
-### Scale
-
-Changes the overall size of the generated geometry without changing its relative shape. Click **Recompute** after changing Scale. Model inference is not repeated.
 
 ### Edge Threshold
 

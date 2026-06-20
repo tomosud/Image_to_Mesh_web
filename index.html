@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image to Mesh — World Position Viewer</title>
     <link rel="icon" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3e%3cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3e%3c/svg%3e">
-    <link rel="stylesheet" href="css/style.css?v=20260620-12">
+    <link rel="stylesheet" href="css/style.css?v=20260620-13">
 </head>
 <body>
     <div id="container">
@@ -73,7 +73,7 @@
                     <button id="loadAnother">Another Image</button>
                 </div>
                 <div class="control-group">
-                    <label>Model</label>
+                    <label>Model <span class="help-tip" tabindex="0" role="note" data-tooltip="Selects the MoGe-2 model. ViT-S uses the least memory; ViT-L provides the highest quality but requires substantially more GPU and system memory." aria-label="Model help">?</span></label>
                     <select id="modelSelect">
                         <option value="vits">ViT-S (Smallest / Fastest / ~150 MB)</option>
                         <option value="vitb" selected>ViT-B (Balanced / ~400 MB)</option>
@@ -81,32 +81,29 @@
                     </select>
                 </div>
                 <div class="control-group">
-                    <label>Quality (num_tokens): <span id="numTokensValue">1800</span></label>
+                    <label>Quality (num_tokens): <span id="numTokensValue">1800</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Controls the model's internal inference resolution. More tokens produce a larger point/depth/normal map and can preserve finer detail, but increase processing time and memory use. Current range: 1200–2500." aria-label="Quality help">?</span></label>
                     <div class="slider-container">
                         <input type="range" id="numTokens" min="1200" max="2500" step="100" value="1800">
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label>Scale: <span id="scaleValue">1.0</span></label>
-                    <div class="slider-container">
-                        <input type="range" id="scale" min="0.1" max="10" step="0.1" value="1">
                     </div>
                 </div>
                 <div class="control-group">
                     <button id="recompute" disabled>Recompute</button>
                 </div>
                 <div class="control-group">
-                    <label>Edge Threshold: <span id="edgeThresholdValue">0.970</span></label>
+                    <label>Edge Threshold: <span id="edgeThresholdValue">0.970</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Removes geometry around sudden depth changes. Lower values remove more boundary points; higher values preserve more geometry. Off disables depth-edge cleanup." aria-label="Edge Threshold help">?</span></label>
                     <div class="slider-container">
                         <input type="range" id="edgeThreshold" min="0.005" max="1.000" step="0.005" value="0.970">
                     </div>
                     <div class="control-help">Smaller values remove more points. Set 1.000 to disable all depth-edge cleanup.</div>
                 </div>
                 <div class="control-group">
-                    <label class="chk">
-                        <input type="checkbox" id="applyMask" checked>
-                        Apply Mask (remove background / sky)
-                    </label>
+                    <div class="checkbox-with-help">
+                        <label class="chk">
+                            <input type="checkbox" id="applyMask" checked>
+                            Apply Mask (remove background / sky)
+                        </label>
+                        <span class="help-tip" tabindex="0" role="note" data-tooltip="Uses MoGe-2's validity mask to remove background, sky, uncertain regions, and their mesh faces. Disable it to retain more geometry." aria-label="Apply Mask help">?</span>
+                    </div>
                 </div>
                 <div class="control-group dl-group">
                     <div class="dl-title">Downloads</div>

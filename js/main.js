@@ -81,7 +81,6 @@
 
     function getOpts() {
         return {
-            scale: parseFloat($('scale').value),
             applyMask: $('applyMask').checked,
             edgeThreshold: parseFloat($('edgeThreshold').value)
         };
@@ -107,7 +106,7 @@
             currentPost.width,
             currentPost.height,
             cleanedMask,
-            { scale: opts.scale, applyMask: true }
+            { scale: 1.0, applyMask: true }
         );
         currentNormalMap = NormalMap.create(
             currentPost.normal,
@@ -268,7 +267,6 @@
             modelReady = false; // 次回処理時に再ロード
         });
         $('numTokens').addEventListener('input', (e) => { $('numTokensValue').textContent = e.target.value; });
-        $('scale').addEventListener('input', (e) => { $('scaleValue').textContent = parseFloat(e.target.value).toFixed(1); });
         $('edgeThreshold').addEventListener('input', (e) => {
             const value = parseFloat(e.target.value);
             $('edgeThresholdValue').textContent = value >= 1 ? 'Off' : value.toFixed(3);
