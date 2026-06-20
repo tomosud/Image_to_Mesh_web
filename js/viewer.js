@@ -643,6 +643,31 @@ const Viewer = (function () {
     function isPoints() { return isPointsMode; }
 
     // ---- エクスポート ----
+    function getAlignmentTransform() {
+        return {
+            center: activeOrbitPlane ? activeOrbitPlane.center : new THREE.Vector3(),
+            rotation: activeOrbitPlane
+                ? new THREE.Quaternion().setFromUnitVectors(activeOrbitPlane.normal, new THREE.Vector3(0, 1, 0))
+                : new THREE.Quaternion()
+        };
+    }
+
+    function getAlignedWorldPositions(data) {
+        const out = new Float32Array(data.length);
+        const alignment = getAlignmentTransform();
+        const point = new THREE.Vector3();
+        for (let i = 0; i < data.length; i += 4) {
+            const x = data[i], y = data[i + 1], z = data[i + 2];
+            if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+                point.set(x, y, z).sub(alignment.center).applyQuaternion(alignment.rotation);
+                out[i] = point.x; out[i + 1] = point.y; out[i + 2] = point.z; out[i + 3] = data[i + 3];
+            } else {
+                out[i] = x; out[i + 1] = y; out[i + 2] = z; out[i + 3] = data[i + 3];
+            }
+        }
+        return out;
+    }
+
     function exportOBJ() {
         const target = mesh || pointsMesh;
         if (!target) { alert('No mesh is loaded.'); return; }
@@ -650,10 +675,21 @@ const Viewer = (function () {
         const positions = geometry.attributes.position.array;
         const uvs = geometry.attributes.uv.array;
         const indices = geometry.index ? geometry.index.array : null;
+        const alignment = getAlignmentTransform();
+        const exportRotation = activeOrbitPlane ? alignment.rotation : null;
+        const exportPoint = new THREE.Vector3();
 
         let obj = '# World Position Mesh\n# Exported from Image to Mesh Web\n\n';
+        if (activeOrbitPlane) obj += '# Aligned to the selected horizontal grid: center=origin, normal=+Y\n\n';
         for (let i = 0; i < positions.length; i += 3) {
-            obj += `v ${positions[i]} ${positions[i + 1]} ${positions[i + 2]}\n`;
+            let x = positions[i], y = positions[i + 1], z = positions[i + 2];
+            if (exportRotation && Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+                exportPoint.set(x, y, z)
+                    .sub(alignment.center)
+                    .applyQuaternion(exportRotation);
+                x = exportPoint.x; y = exportPoint.y; z = exportPoint.z;
+            }
+            obj += `v ${x} ${y} ${z}\n`;
         }
         obj += '\n';
         for (let i = 0; i < uvs.length; i += 2) {
@@ -668,6 +704,136 @@ const Viewer = (function () {
         }
         const fname = (currentBaseName || 'mesh').replace(/_worldposition$/, '') + '.obj';
         downloadBlob(new Blob([obj], { type: 'text/plain' }), fname);
+    }
+
+    function exportGLB() {
+        const source = mesh || pointsMesh;
+        if (!source) { alert('No mesh is loaded.'); return; }
+        if (!THREE.GLTFExporter) { alert('GLTFExporter failed to load.'); return; }
+
+        const exportScene = new THREE.Scene();
+        exportScene.name = 'ImageToMeshScene';
+        const exportGeometry = createCompactExportGeometry(source.geometry);
+        if (!exportGeometry || !exportGeometry.index || exportGeometry.index.count === 0) {
+            alert('No valid mesh faces are available for GLB export.');
+            return;
+        }
+
+        const exportTexture = createGLBTexture();
+        const exportMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            map: exportTexture,
+            side: THREE.DoubleSide
+        });
+        const exportMesh = new THREE.Mesh(exportGeometry, exportMaterial);
+        exportMesh.name = 'AlignedMesh';
+        exportScene.add(exportMesh);
+
+        addExportCameras(exportScene);
+        const exporter = new THREE.GLTFExporter();
+        const cleanup = () => {
+            exportGeometry.dispose();
+            exportMaterial.dispose();
+            if (exportTexture) exportTexture.dispose();
+        };
+        try {
+            exporter.parse(exportScene, (result) => {
+                downloadBlob(
+                    new Blob([result], { type: 'model/gltf-binary' }),
+                    `${(currentBaseName || 'scene').replace(/_worldposition$/, '')}_scene.glb`
+                );
+                cleanup();
+            }, { binary: true, onlyVisible: true, truncateDrawRange: true });
+        } catch (error) {
+            cleanup();
+            console.error(error);
+            alert('GLB export failed: ' + (error && error.message ? error.message : error));
+        }
+    }
+
+    function createCompactExportGeometry(sourceGeometry) {
+        const positions = sourceGeometry.attributes.position.array;
+        const uvs = sourceGeometry.attributes.uv ? sourceGeometry.attributes.uv.array : null;
+        const sourceIndices = sourceGeometry.index ? sourceGeometry.index.array : null;
+        if (!sourceIndices) return null;
+
+        const alignment = getAlignmentTransform();
+        const remap = new Map();
+        const outPositions = [];
+        const outUVs = [];
+        const outIndices = [];
+        const point = new THREE.Vector3();
+
+        for (let i = 0; i < sourceIndices.length; i++) {
+            const sourceIndex = sourceIndices[i];
+            let exportIndex = remap.get(sourceIndex);
+            if (exportIndex == null) {
+                const pi = sourceIndex * 3;
+                const x = positions[pi], y = positions[pi + 1], z = positions[pi + 2];
+                if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+                point.set(x, y, z).sub(alignment.center).applyQuaternion(alignment.rotation);
+                exportIndex = outPositions.length / 3;
+                remap.set(sourceIndex, exportIndex);
+                outPositions.push(point.x, point.y, point.z);
+                if (uvs) outUVs.push(uvs[sourceIndex * 2], uvs[sourceIndex * 2 + 1]);
+            }
+            outIndices.push(exportIndex);
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(outPositions, 3));
+        if (uvs) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(outUVs, 2));
+        geometry.setIndex(outIndices);
+        geometry.computeVertexNormals();
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        return geometry;
+    }
+
+    function createGLBTexture() {
+        if (!currentColorTexture) return null;
+        const canvas = document.createElement('canvas');
+        canvas.width = currentColorTexture.width;
+        canvas.height = currentColorTexture.height;
+        const context = canvas.getContext('2d');
+        const pixels = new Uint8ClampedArray(currentColorTexture.data);
+        context.putImageData(new ImageData(pixels, canvas.width, canvas.height), 0, 0);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.flipY = true;
+        texture.needsUpdate = true;
+        return texture;
+    }
+
+    function addExportCameras(exportScene) {
+        const alignment = getAlignmentTransform();
+        const transformPoint = (value) => value.clone().sub(alignment.center).applyQuaternion(alignment.rotation);
+        const transformDirection = (value) => value.clone().applyQuaternion(alignment.rotation).normalize();
+
+        const viewCamera = camera.clone();
+        viewCamera.name = 'CurrentViewCamera';
+        viewCamera.position.copy(transformPoint(camera.position));
+        viewCamera.up.copy(transformDirection(camera.up));
+        viewCamera.lookAt(transformPoint(controls.target));
+        viewCamera.updateProjectionMatrix();
+        exportScene.add(viewCamera);
+
+        if (hasValidIntrinsics(currentIntrinsics) && currentWorldPosData) {
+            const sourceFov = THREE.MathUtils.radToDeg(2 * Math.atan(0.5 / currentIntrinsics.fy));
+            const sourceCamera = new THREE.PerspectiveCamera(
+                sourceFov,
+                currentWorldPosData.width / currentWorldPosData.height,
+                camera.near,
+                camera.far
+            );
+            sourceCamera.name = 'EstimatedSourceCamera';
+            const bounds = calculateBounds(currentWorldPosData.data);
+            const sourceTarget = new THREE.Vector3(0, 0, (bounds.minZ + bounds.maxZ) * 0.5);
+            sourceCamera.position.copy(transformPoint(new THREE.Vector3()));
+            sourceCamera.up.copy(transformDirection(new THREE.Vector3(0, 1, 0)));
+            sourceCamera.lookAt(transformPoint(sourceTarget));
+            sourceCamera.updateProjectionMatrix();
+            exportScene.add(sourceCamera);
+        }
     }
 
     function exportPNG() {
@@ -706,6 +872,6 @@ const Viewer = (function () {
         toggleHorizontalGridAdjustment, useHorizontalGrid,
         setPointsMode, setPointSize, toggleWireframe,
         setLighting, setColorDisabled, isPoints,
-        exportOBJ, exportPNG
+        getAlignedWorldPositions, exportOBJ, exportGLB, exportPNG
     };
 })();

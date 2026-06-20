@@ -80,13 +80,16 @@ Disabling it includes the full image but may create unwanted geometry around for
 |---|---|
 | Original | The source JPG or PNG file |
 | Depth (EXR) | FLOAT depth data in the `Y` channel |
-| WorldPos (EXR) | FLOAT world positions with `R=X`, `G=Y`, and `B=Z` |
-| OBJ | Triangle mesh with UV coordinates |
+| Aligned WorldPos (EXR) | FLOAT world positions with `R=X`, `G=Y`, and `B=Z`, transformed to the committed horizontal grid |
+| OBJ | Triangle mesh with UV coordinates; aligned to the committed horizontal grid when available |
+| Scene GLB | Aligned textured mesh with `EstimatedSourceCamera` and `CurrentViewCamera` |
 | PNG (2048) | The current view rendered at 2048×2048 |
 
 Output file names are based on the source image name.
 
 World Position and OBJ outputs use a Y-up coordinate system intended for Houdini.
+
+When a horizontal grid has been committed, OBJ, Aligned WorldPos EXR, and Scene GLB place the selected three-point center at the origin and rotate the selected plane normal to `+Y`, making the selected grid plane `Y=0`. Scene GLB contains a compact valid-face mesh, the source image texture, the estimated source camera, and the current viewer camera. Depth EXR remains in the original camera-depth coordinate system.
 
 ## Current Implementation
 

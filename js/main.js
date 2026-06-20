@@ -41,7 +41,7 @@
     }
 
     function setDownloadEnabled(on) {
-        ['dlImage', 'dlDepth', 'dlWorldPos', 'exportOBJ', 'exportPNG', 'recompute'].forEach(id => {
+        ['dlImage', 'dlDepth', 'dlWorldPos', 'exportOBJ', 'exportGLB', 'exportPNG', 'recompute'].forEach(id => {
             $(id).disabled = !on;
         });
     }
@@ -264,9 +264,11 @@
         });
         $('dlWorldPos').addEventListener('click', () => {
             if (!currentWP) return;
-            Downloader.saveWorldPosEXR(currentWP.data, currentWP.width, currentWP.height, currentBaseName);
+            const aligned = Viewer.getAlignedWorldPositions(currentWP.data);
+            Downloader.saveWorldPosEXR(aligned, currentWP.width, currentWP.height, currentBaseName, true);
         });
         $('exportOBJ').addEventListener('click', Viewer.exportOBJ);
+        $('exportGLB').addEventListener('click', Viewer.exportGLB);
         $('exportPNG').addEventListener('click', Viewer.exportPNG);
     }
 

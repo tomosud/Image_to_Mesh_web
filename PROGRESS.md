@@ -27,6 +27,9 @@
 - [x] mask と深度不連続による不要面の除去
 - [x] 推定 intrinsics を使った正面初期カメラと Reset View
 - [x] 3点指定による水平面・回転中心・手前側の設定
+- [x] 確定済み水平グリッドへの OBJ 座標変換（中心=原点、法線=+Y）
+- [x] 水平グリッドへ変換した World Position EXR
+- [x] 変換済みメッシュ・テクスチャ・推定元カメラ・現在カメラを含む Scene GLB
 - [x] Depth EXR / World Position EXR / OBJ / PNG の出力
 - [x] GitHub Pages デプロイ設定
 

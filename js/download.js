@@ -23,9 +23,10 @@ const Downloader = (function () {
     }
 
     // world position EXR (RGBA Float32, XYZ+1)
-    function saveWorldPosEXR(rgba, width, height, baseName) {
+    function saveWorldPosEXR(rgba, width, height, baseName, aligned) {
         const blob = EXR.encodeWorldPos(rgba, width, height);
-        saveBlob(blob, `${baseName}_worldposition.exr`);
+        const suffix = aligned ? '_worldposition_aligned.exr' : '_worldposition.exr';
+        saveBlob(blob, `${baseName}${suffix}`);
     }
 
     return { saveBlob, saveOriginal, saveDepthEXR, saveWorldPosEXR };
