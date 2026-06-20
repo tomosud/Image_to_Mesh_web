@@ -116,7 +116,7 @@ The browser pipeline is:
 
 The initial view and **Reset View** use the focal length estimated during MoGe post-processing. The viewer places the camera at the estimated source-camera origin and looks along the image's +Z axis, so the mesh opens from the same front-facing composition as the input image. If valid camera parameters are unavailable, the viewer falls back to a front-facing bounds fit.
 
-For tabletop or other tilted-camera images, click **Adjust Horizontal Grid**. The current orbit plane first appears as a grid and the three-point instructions become visible. Select three well-spaced points on one surface to preview a new grid, then click **Use This Grid** to commit it or **Cancel** to discard it. The centroid becomes the orbit center and the plane normal becomes the up axis; point order does not matter. The committed grid disappears, but its center and up axis remain active. **Reset View** keeps this calibration and rebuilds the view from the estimated source-camera position.
+For tabletop or other tilted-camera images, click **Adjust Horizontal Grid**. The current orbit plane first appears as a grid and the three-point instructions become visible. Select three well-spaced points on one surface to preview a new grid, then click **Use This Grid** to commit it or **Cancel** to discard it. The centroid becomes the orbit center and the plane normal becomes the up axis; point order does not matter. The committed grid disappears, but its calibration remains active. **Reset View** keeps the adjusted up axis while restoring the original image-center target and estimated source-camera position.
 
 ## Run Locally
 

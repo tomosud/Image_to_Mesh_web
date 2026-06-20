@@ -377,7 +377,7 @@ const Viewer = (function () {
         cancelOrbitPlaneAdjustment(true);
         const adjustedPlane = activeOrbitPlane;
         camera.up.copy(adjustedPlane ? adjustedPlane.normal : new THREE.Vector3(0, 1, 0));
-        createOrbitControls(adjustedPlane ? adjustedPlane.center : new THREE.Vector3(), !!adjustedPlane);
+        createOrbitControls(new THREE.Vector3(), !!adjustedPlane);
         if (hasValidIntrinsics(currentIntrinsics) && bounds.minZ > 0) {
             // WorldPos flips camera X/Y while preserving Z. Looking from the
             // estimated camera origin toward +Z therefore reproduces the source
@@ -387,8 +387,7 @@ const Viewer = (function () {
             const vfovForWidth = 2 * Math.atan(Math.tan(sourceHfov * 0.5) / camera.aspect);
             camera.fov = THREE.MathUtils.radToDeg(Math.max(sourceVfov, vfovForWidth)) * 1.02;
             camera.position.set(0, 0, 0);
-            if (adjustedPlane) controls.target.copy(adjustedPlane.center);
-            else controls.target.set(0, 0, center.z);
+            controls.target.set(0, 0, center.z);
         } else {
             // Fallback for imported/invalid data: fit the bounds from the same
             // front side as the source camera, without the previous X/Y offset.
@@ -401,7 +400,7 @@ const Viewer = (function () {
             ) * 1.1;
             const distance = Math.max(fitDistance, size.z * 0.5 + Math.max(fitDistance * 0.05, 1e-3));
             camera.position.set(center.x, center.y, center.z - distance);
-            controls.target.copy(adjustedPlane ? adjustedPlane.center : center);
+            controls.target.copy(center);
         }
 
         const distance = camera.position.distanceTo(controls.target);
