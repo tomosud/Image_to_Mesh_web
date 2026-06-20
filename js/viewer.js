@@ -10,6 +10,7 @@ const Viewer = (function () {
     let currentBaseName = '';
     let currentIntrinsics = null;     // normalized { fx, fy, cx, cy }
     let raycaster, pointerNdc, selectionMarkers;
+    let selectionMarkerTexture = null;
     let orbitPlaneGrid = null;
     let orbitPlaneUpArrow = null;
     let orbitPlanePoints = [];
@@ -517,19 +518,38 @@ const Viewer = (function () {
     }
 
     function addSelectionMarker(point, index) {
-        const bounds = calculateBounds(currentWorldPosData.data);
-        const diagonal = Math.hypot(
-            bounds.maxX - bounds.minX,
-            bounds.maxY - bounds.minY,
-            bounds.maxZ - bounds.minZ
-        );
-        const geometry = new THREE.SphereGeometry(Math.max(diagonal * 0.008, 1e-4), 16, 12);
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute([point.x, point.y, point.z], 3));
         const colors = [0xff5c5c, 0x63e67b, 0x66a3ff];
-        const material = new THREE.MeshBasicMaterial({ color: colors[index], depthTest: false });
-        const marker = new THREE.Mesh(geometry, material);
-        marker.position.copy(point);
+        const material = new THREE.PointsMaterial({
+            color: colors[index],
+            size: 18 / renderer.getPixelRatio(),
+            sizeAttenuation: false,
+            map: getSelectionMarkerTexture(),
+            transparent: true,
+            alphaTest: 0.5,
+            depthTest: false,
+            depthWrite: false
+        });
+        const marker = new THREE.Points(geometry, material);
         marker.renderOrder = 1000;
         selectionMarkers.add(marker);
+    }
+
+    function getSelectionMarkerTexture() {
+        if (selectionMarkerTexture) return selectionMarkerTexture;
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const context = canvas.getContext('2d');
+        context.clearRect(0, 0, 64, 64);
+        context.fillStyle = '#ffffff';
+        context.beginPath();
+        context.arc(32, 32, 28, 0, Math.PI * 2);
+        context.fill();
+        selectionMarkerTexture = new THREE.CanvasTexture(canvas);
+        selectionMarkerTexture.needsUpdate = true;
+        return selectionMarkerTexture;
     }
 
     function previewOrbitPlane() {
