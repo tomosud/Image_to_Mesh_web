@@ -25,6 +25,7 @@
 - [x] Y-up World Position の生成
 - [x] メッシュ、点群、ワイヤーフレーム、Unlit、No Color 表示
 - [x] mask と深度不連続による不要面の除去
+- [x] MoGe公式出力相当の深度エッジ頂点・面除去（Edge Threshold、範囲0.005〜1.000、既定0.970、1.000=完全Off）
 - [x] 推定 intrinsics を使った正面初期カメラと Reset View
 - [x] 3点指定による水平面・回転中心・手前側の設定
 - [x] 確定済み水平グリッドへの OBJ 座標変換（中心=原点、法線=+Y）

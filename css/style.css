@@ -258,6 +258,18 @@ button:disabled {
     background: rgba(102, 126, 234, 0.35);
 }
 
+#useHorizontalGrid {
+    border-color: #ffad42;
+    background: rgba(230, 118, 18, 0.9);
+    color: #ffffff;
+    font-weight: 700;
+}
+
+#useHorizontalGrid:hover {
+    border-color: #ffd08a;
+    background: rgba(255, 139, 31, 1);
+}
+
 .hidden-control {
     display: none;
 }

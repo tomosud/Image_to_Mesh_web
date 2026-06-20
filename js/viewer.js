@@ -9,6 +9,7 @@ const Viewer = (function () {
     let currentTextureObject = null;  // THREE.DataTexture cache
     let currentBaseName = '';
     let currentIntrinsics = null;     // normalized { fx, fy, cx, cy }
+    let currentViewerOptions = {};
     let raycaster, pointerNdc, selectionMarkers;
     let selectionMarkerTexture = null;
     let orbitPlaneGrid = null;
@@ -89,13 +90,14 @@ const Viewer = (function () {
     // 外部から推論結果を受け取る
     // worldPos: Float32Array(H*W*4) RGBA(=XYZ+1), w/h: WP解像度
     // colorTex: { data: Uint8Array RGBA, width, height } | null
-    function setData(worldPos, w, h, colorTex, baseName, intrinsics) {
+    function setData(worldPos, w, h, colorTex, baseName, intrinsics, viewerOptions) {
         init();
         currentWorldPosData = { data: worldPos, width: w, height: h };
         currentColorTexture = colorTex || null;
         currentTextureObject = null; // 再生成
         currentBaseName = baseName || 'mesh';
         currentIntrinsics = intrinsics || null;
+        currentViewerOptions = viewerOptions || {};
         createMesh(false);
     }
 
@@ -112,6 +114,7 @@ const Viewer = (function () {
 
         const geometry = new THREE.PlaneGeometry(1, 1, meshWidth - 1, meshHeight - 1);
         const positions = geometry.attributes.position.array;
+        const geometryUVs = geometry.attributes.uv.array;
 
         for (let i = 0; i < positions.length; i += 3) {
             const vertexIndex = i / 3;
@@ -122,6 +125,12 @@ const Viewer = (function () {
             const v = row / (meshHeight - 1);
             const srcX = u * (width - 1);
             const srcY = v * (height - 1);
+
+            // MoGe and MogePost treat samples as pixel centers. Keep texture
+            // coordinates on the same convention instead of mapping the first
+            // and last sample to the outer image edges.
+            geometryUVs[vertexIndex * 2] = (srcX + 0.5) / width;
+            geometryUVs[vertexIndex * 2 + 1] = 1 - (srcY + 0.5) / height;
 
             const x0 = Math.floor(srcX);
             const y0 = Math.floor(srcY);
@@ -147,7 +156,11 @@ const Viewer = (function () {
         }
 
         geometry.attributes.position.needsUpdate = true;
-        removeInvalidAndDiscontinuousFaces(geometry, positions);
+        removeInvalidAndDiscontinuousFaces(
+            geometry,
+            positions,
+            !currentViewerOptions.disableDepthEdgeCleanup
+        );
         updateFiniteGeometryBounds(geometry, positions);
         geometry.computeVertexNormals();
 
@@ -158,8 +171,8 @@ const Viewer = (function () {
             for (let i = 0; i < uvs.length / 2; i++) {
                 const u = uvs[i * 2];
                 const vv = uvs[i * 2 + 1];
-                const texX = Math.floor(u * (currentColorTexture.width - 1));
-                const texY = Math.floor((1 - vv) * (currentColorTexture.height - 1));
+                const texX = Math.min(currentColorTexture.width - 1, Math.floor(u * currentColorTexture.width));
+                const texY = Math.min(currentColorTexture.height - 1, Math.floor((1 - vv) * currentColorTexture.height));
                 const texIndex = (texY * currentColorTexture.width + texX) * 4;
                 colors[i * 3] = currentColorTexture.data[texIndex] / 255;
                 colors[i * 3 + 1] = currentColorTexture.data[texIndex + 1] / 255;
@@ -206,7 +219,7 @@ const Viewer = (function () {
 
     // Do not connect masked pixels or surfaces separated by a large depth jump.
     // A regular image-grid mesh otherwise produces long sheets at silhouettes.
-    function removeInvalidAndDiscontinuousFaces(geometry, positions) {
+    function removeInvalidAndDiscontinuousFaces(geometry, positions, removeDepthEdges) {
         if (!geometry.index) return;
         const source = geometry.index.array;
         const kept = [];
@@ -222,9 +235,11 @@ const Viewer = (function () {
                 continue;
             }
 
-            const minDepth = Math.min(Math.abs(az), Math.abs(bz), Math.abs(cz));
-            const depthJump = Math.max(az, bz, cz) - Math.min(az, bz, cz);
-            if (depthJump > relativeDepthThreshold * Math.max(minDepth, 1e-6)) continue;
+            if (removeDepthEdges) {
+                const minDepth = Math.min(Math.abs(az), Math.abs(bz), Math.abs(cz));
+                const depthJump = Math.max(az, bz, cz) - Math.min(az, bz, cz);
+                if (depthJump > relativeDepthThreshold * Math.max(minDepth, 1e-6)) continue;
+            }
             kept.push(a, b, c);
         }
 

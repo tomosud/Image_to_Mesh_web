@@ -81,7 +81,8 @@
     function getOpts() {
         return {
             scale: parseFloat($('scale').value),
-            applyMask: $('applyMask').checked
+            applyMask: $('applyMask').checked,
+            edgeThreshold: parseFloat($('edgeThreshold').value)
         };
     }
 
@@ -91,8 +92,21 @@
         // metric scale 適用は常時。mask 適用は表示側 opts。
         currentPost = MogePost.process(currentMoge, { useMetric: true });
         const opts = getOpts();
+        const cleanedMask = MogePost.cleanDepthMask(
+            currentPost.depth,
+            currentPost.mask,
+            currentPost.width,
+            currentPost.height,
+            opts.edgeThreshold,
+            opts.applyMask
+        );
+        currentPost.cleanedMask = cleanedMask;
         currentWP = WorldPos.fromCameraPoints(
-            currentPost.points, currentPost.width, currentPost.height, currentPost.mask, opts
+            currentPost.points,
+            currentPost.width,
+            currentPost.height,
+            cleanedMask,
+            { scale: opts.scale, applyMask: true }
         );
         const colorTex = colorTexFromImageData(currentImageData);
         Viewer.setData(
@@ -101,7 +115,8 @@
             currentWP.height,
             colorTex,
             currentBaseName,
-            currentPost.intrinsics
+            currentPost.intrinsics,
+            { disableDepthEdgeCleanup: opts.edgeThreshold >= 1 }
         );
         setDownloadEnabled(true);
     }
@@ -245,6 +260,11 @@
         });
         $('numTokens').addEventListener('input', (e) => { $('numTokensValue').textContent = e.target.value; });
         $('scale').addEventListener('input', (e) => { $('scaleValue').textContent = parseFloat(e.target.value).toFixed(1); });
+        $('edgeThreshold').addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            $('edgeThresholdValue').textContent = value >= 1 ? 'Off' : value.toFixed(3);
+        });
+        $('edgeThreshold').addEventListener('change', recompute);
         $('applyMask').addEventListener('change', recompute);
         $('recompute').addEventListener('click', () => {
             // モデル変更 or num_tokens が変わっていれば再推論、そうでなければ後処理のみ

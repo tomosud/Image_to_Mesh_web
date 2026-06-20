@@ -62,6 +62,19 @@ Removes the background, sky, and uncertain regions from the mesh. Keep this enab
 
 Disabling it includes the full image but may create unwanted geometry around foreground boundaries.
 
+### Edge Threshold
+
+Removes vertices on both sides of sharp depth discontinuities before creating the point cloud or mesh. This follows the edge-cleanup stage used by MoGe's official mesh export.
+
+- Range: `0.005`–`1.000`
+- Default: `0.970`
+- Smaller values remove more depth-edge vertices
+- Larger values preserve more geometry but may leave stretched boundary artifacts
+- `1.000` (`Off`) disables both vertex and face depth-edge cleanup
+- To disable all optional removal, also turn off **Apply Mask**; invalid/non-positive depths still cannot form geometry
+
+Changing this value only requires **Recompute**; model inference is not repeated.
+
 ## Display Settings
 
 - Points Only: display the geometry as a point cloud

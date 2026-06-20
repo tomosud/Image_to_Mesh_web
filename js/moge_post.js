@@ -206,5 +206,57 @@ const MogePost = (function () {
         };
     }
 
-    return { process, recoverFocalShift };
+    // MoGe's official mesh export removes depth-edge pixels before topology is
+    // built. This browser equivalent invalidates both sides of a discontinuity,
+    // so the same cleanup affects points, meshes, and all geometry exports.
+    function cleanDepthMask(depth, baseMask, W, H, rtol, applyBaseMask) {
+        rtol = Number.isFinite(rtol) ? Math.max(rtol, 0) : 0.04;
+        const mask = new Uint8Array(W * H);
+        const rejected = new Uint8Array(W * H);
+
+        for (let i = 0; i < W * H; i++) {
+            const validDepth = Number.isFinite(depth[i]) && depth[i] > 0;
+            const validBase = !applyBaseMask || !baseMask || baseMask[i] !== 0;
+            mask[i] = validDepth && validBase ? 1 : 0;
+        }
+
+        if (rtol >= 1) {
+            let kept = 0;
+            for (let i = 0; i < mask.length; i++) kept += mask[i];
+            console.log('[MogePost edge cleanup]', { rtol: 'off', kept, removed: mask.length - kept, size: `${W}x${H}` });
+            return mask;
+        }
+
+        // Compare each horizontal/vertical grid edge once. Diagonal checks and
+        // mask erosion make silhouettes unnecessarily thick.
+        const offsets = [[1, 0], [0, 1]];
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                const i = y * W + x;
+                if (!mask[i]) continue;
+                for (const [dx, dy] of offsets) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                    const j = ny * W + nx;
+                    if (!mask[j]) continue;
+                    const minDepth = Math.max(Math.min(depth[i], depth[j]), 1e-6);
+                    const relativeJump = Math.abs(depth[i] - depth[j]) / minDepth;
+                    if (relativeJump > rtol) {
+                        rejected[i] = 1;
+                        rejected[j] = 1;
+                    }
+                }
+            }
+        }
+
+        let kept = 0, removed = 0;
+        for (let i = 0; i < mask.length; i++) {
+            if (rejected[i]) mask[i] = 0;
+            if (mask[i]) kept++; else removed++;
+        }
+        console.log('[MogePost edge cleanup]', { rtol, kept, removed, size: `${W}x${H}` });
+        return mask;
+    }
+
+    return { process, recoverFocalShift, cleanDepthMask };
 })();
