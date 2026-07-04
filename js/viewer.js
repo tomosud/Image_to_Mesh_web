@@ -9,6 +9,9 @@ const Viewer = (function () {
     let currentTextureObject = null;  // THREE.DataTexture cache
     let currentNormalTexture = null;  // { data: Uint8Array RGBA, width, height }
     let currentNormalTextureObject = null;
+    let currentBackfillLayer = null;  // Backfill.generate() の戻り値
+    let backfillMesh = null;          // THREE.Mesh | THREE.Points
+    let backfillTextureObject = null;
     let currentBaseName = '';
     let currentIntrinsics = null;     // normalized { fx, fy, cx, cy }
     let currentViewerOptions = {};
@@ -213,8 +216,97 @@ const Viewer = (function () {
 
         const bounds = calculateBounds(worldPosData);
         updateMeshInfo(meshWidth, meshHeight, bounds);
+        rebuildBackfillMesh();
 
         if (!skipCameraReset) resetCamera();
+    }
+
+    // ---- 遮蔽穴インペイントの第2レイヤー（backfill.js の出力）----
+    function setBackfillLayer(layer) {
+        currentBackfillLayer = layer || null;
+        if (backfillTextureObject) { backfillTextureObject.dispose(); backfillTextureObject = null; }
+        if (initialized) rebuildBackfillMesh();
+    }
+
+    function getBackfillTextureObject() {
+        if (!currentBackfillLayer) return null;
+        if (!backfillTextureObject) {
+            const tex = currentBackfillLayer.colorTex;
+            backfillTextureObject = new THREE.DataTexture(
+                tex.data, tex.width, tex.height, THREE.RGBAFormat, THREE.UnsignedByteType
+            );
+            backfillTextureObject.needsUpdate = true;
+            backfillTextureObject.flipY = true;
+            backfillTextureObject.magFilter = THREE.LinearFilter;
+            backfillTextureObject.minFilter = THREE.LinearFilter;
+            backfillTextureObject.generateMipmaps = false;
+            backfillTextureObject.encoding = THREE.sRGBEncoding;
+        }
+        return backfillTextureObject;
+    }
+
+    function createBackfillMaterial() {
+        const MaterialClass = disableLighting ? THREE.MeshBasicMaterial : THREE.MeshStandardMaterial;
+        if (disableColor || !currentBackfillLayer) {
+            return new MaterialClass({ color: 0xffffff, side: THREE.DoubleSide, flatShading: false });
+        }
+        return new MaterialClass({ map: getBackfillTextureObject(), side: THREE.DoubleSide, flatShading: false });
+    }
+
+    function disposeBackfillMesh() {
+        if (!backfillMesh) return;
+        scene.remove(backfillMesh);
+        backfillMesh.geometry.dispose();
+        backfillMesh.material.dispose();
+        backfillMesh = null;
+    }
+
+    function rebuildBackfillMesh() {
+        disposeBackfillMesh();
+        const layer = currentBackfillLayer;
+        if (!layer || !currentWorldPosData) return;
+
+        // レイヤーはモデル解像度そのまま（≤2048 前提）なので 1:1 のグリッドを張る
+        const W = layer.width, H = layer.height;
+        const geometry = new THREE.PlaneGeometry(1, 1, W - 1, H - 1);
+        const positions = geometry.attributes.position.array;
+        const uvs = geometry.attributes.uv.array;
+        for (let i = 0; i < W * H; i++) {
+            const pi = i * 4;
+            positions[i * 3] = layer.worldPos[pi];
+            positions[i * 3 + 1] = layer.worldPos[pi + 1];
+            positions[i * 3 + 2] = layer.worldPos[pi + 2];
+            uvs[i * 2] = ((i % W) + 0.5) / W;
+            uvs[i * 2 + 1] = 1 - (((i / W) | 0) + 0.5) / H;
+        }
+        geometry.attributes.position.needsUpdate = true;
+        // 生成面は構成上滑らかなので深度段差の除去は不要。NaN 面のみ除去。
+        removeInvalidAndDiscontinuousFaces(geometry, positions, false);
+        if (!geometry.index || geometry.index.count === 0) { geometry.dispose(); return; }
+        updateFiniteGeometryBounds(geometry, positions);
+        geometry.computeVertexNormals();
+
+        if (isPointsMode) {
+            const colors = new Float32Array(W * H * 3);
+            const linearColor = new THREE.Color();
+            const tex = layer.colorTex;
+            for (let i = 0; i < W * H; i++) {
+                linearColor.setRGB(
+                    tex.data[i * 4] / 255, tex.data[i * 4 + 1] / 255, tex.data[i * 4 + 2] / 255
+                ).convertSRGBToLinear();
+                colors[i * 3] = linearColor.r;
+                colors[i * 3 + 1] = linearColor.g;
+                colors[i * 3 + 2] = linearColor.b;
+            }
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            backfillMesh = new THREE.Points(geometry, createPointsMaterial());
+        } else {
+            const material = createBackfillMaterial();
+            material.wireframe = isWireframeMode;
+            backfillMesh = new THREE.Mesh(geometry, material);
+        }
+        backfillMesh.name = 'BackfillMesh';
+        scene.add(backfillMesh);
     }
 
     function createOrbitControls(target, frontSideOnly) {
@@ -381,6 +473,13 @@ const Viewer = (function () {
             const nm = createMaterial();
             nm.wireframe = isWireframeMode;
             mesh.material = nm;
+            old.dispose();
+        }
+        if (backfillMesh && backfillMesh.isMesh) {
+            const old = backfillMesh.material;
+            const nm = createBackfillMaterial();
+            nm.wireframe = isWireframeMode;
+            backfillMesh.material = nm;
             old.dispose();
         }
     }
@@ -710,6 +809,7 @@ const Viewer = (function () {
     function toggleWireframe() {
         isWireframeMode = !isWireframeMode;
         if (mesh) mesh.material.wireframe = isWireframeMode;
+        if (backfillMesh && backfillMesh.isMesh) backfillMesh.material.wireframe = isWireframeMode;
         return isWireframeMode;
     }
     function setLighting(disabled) { disableLighting = disabled; updateMaterial(); }
@@ -805,6 +905,23 @@ const Viewer = (function () {
         exportMesh.name = 'AlignedMesh';
         exportScene.add(exportMesh);
 
+        // 遮蔽穴インペイントの第2レイヤーも同じ整列でエクスポート
+        let backfillGeometry = null, backfillMaterial = null, backfillGlbTexture = null;
+        if (backfillMesh && currentBackfillLayer) {
+            backfillGeometry = createCompactExportGeometry(backfillMesh.geometry);
+            if (backfillGeometry && backfillGeometry.index && backfillGeometry.index.count > 0) {
+                backfillGlbTexture = createGLBTexture(currentBackfillLayer.colorTex, true);
+                backfillMaterial = new THREE.MeshStandardMaterial({
+                    color: 0xffffff,
+                    map: backfillGlbTexture,
+                    side: THREE.DoubleSide
+                });
+                const backfillExportMesh = new THREE.Mesh(backfillGeometry, backfillMaterial);
+                backfillExportMesh.name = 'BackfillMesh';
+                exportScene.add(backfillExportMesh);
+            }
+        }
+
         addExportCameras(exportScene);
         const exporter = new THREE.GLTFExporter();
         const cleanup = () => {
@@ -812,6 +929,9 @@ const Viewer = (function () {
             exportMaterial.dispose();
             if (exportTexture) exportTexture.dispose();
             if (exportNormalTexture) exportNormalTexture.dispose();
+            if (backfillGeometry) backfillGeometry.dispose();
+            if (backfillMaterial) backfillMaterial.dispose();
+            if (backfillGlbTexture) backfillGlbTexture.dispose();
         };
         try {
             exporter.parse(exportScene, (result) => {
@@ -947,7 +1067,7 @@ const Viewer = (function () {
     }
 
     return {
-        init, setData, resetCamera,
+        init, setData, setBackfillLayer, resetCamera,
         toggleHorizontalGridAdjustment, useHorizontalGrid,
         setPointsMode, setPointSize, toggleWireframe,
         setLighting, setColorDisabled, isPoints,

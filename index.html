@@ -105,12 +105,29 @@
                         <span class="help-tip" tabindex="0" role="note" data-tooltip="Uses MoGe-2's validity mask to remove background, sky, uncertain regions, and their mesh faces. Disable it to retain more geometry." aria-label="Apply Mask help">?</span>
                     </div>
                 </div>
+                <div class="control-group">
+                    <div class="checkbox-with-help">
+                        <label class="chk">
+                            <input type="checkbox" id="fillOcclusion" checked>
+                            Fill Occlusion (Inpaint)
+                        </label>
+                        <span class="help-tip" tabindex="0" role="note" data-tooltip="Fills holes cut at depth edges with a second background layer extended from the far side. Allows slight look-around without seeing through the mesh." aria-label="Fill Occlusion help">?</span>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Fill Margin (px): <span id="fillMarginValue">48</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="How far the background layer extends behind foreground silhouettes. Larger values tolerate more camera movement but extrapolate more." aria-label="Fill Margin help">?</span></label>
+                    <div class="slider-container">
+                        <input type="range" id="fillMargin" min="8" max="128" step="4" value="48">
+                    </div>
+                </div>
                 <div class="control-group dl-group">
                     <div class="dl-title">Downloads</div>
                     <button id="dlImage" disabled>Original</button>
                     <button id="dlDepth" disabled>Depth (EXR)</button>
                     <button id="dlNormal" disabled>Normal Map (PNG)</button>
                     <button id="dlWorldPos" disabled>Aligned WorldPos (EXR)</button>
+                    <button id="dlBackfillWP" disabled>Backfill WorldPos (EXR)</button>
+                    <button id="dlBackfillTex" disabled>Backfill Texture (PNG)</button>
                     <button id="exportOBJ" disabled>OBJ</button>
                     <button id="exportGLB" disabled>Scene GLB</button>
                     <button id="exportPNG" disabled>PNG (2048)</button>
@@ -160,9 +177,10 @@
     <script src="js/moge_post.js?v=20260620-13"></script>
     <script src="js/worldpos.js?v=20260620-13"></script>
     <script src="js/normalmap.js?v=20260620-13"></script>
-    <script src="js/viewer.js?v=20260620-13"></script>
+    <script src="js/backfill.js?v=20260704-3"></script>
+    <script src="js/viewer.js?v=20260704-1"></script>
     <script src="js/inference.js?v=20260620-13"></script>
-    <script src="js/download.js?v=20260620-13"></script>
-    <script src="js/main.js?v=20260620-13"></script>
+    <script src="js/download.js?v=20260704-1"></script>
+    <script src="js/main.js?v=20260704-1"></script>
 </body>
 </html>

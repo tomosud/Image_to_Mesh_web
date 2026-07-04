@@ -1,6 +1,6 @@
 # 実装状況
 
-最終更新: 2026-06-20
+最終更新: 2026-07-04
 
 ## 現在の構成
 
@@ -11,8 +11,9 @@
 1. `js/inference.js`: MoGe-2 ONNX 推論。ViT-S / ViT-B / ViT-L、`num_tokens`、WebGPU → WASM フォールバック、Cache API に対応。
 2. `js/moge_post.js`: point map から focal/shift を復元し、正規化 intrinsics、metric depth、camera-space point map、二値 mask を生成。
 3. `js/worldpos.js`: camera-space `(X right, Y down, Z forward)` を Y-up の `(-X, -Y, Z)` へ変換し、表示スケールと mask を適用。
-4. `js/viewer.js`: three.js でテクスチャ付きメッシュまたは点群を表示。無効画素と大きな深度段差をまたぐ面を除去。
-5. `js/download.js` / `js/exr.js`: 元画像、Depth EXR、World Position EXR、OBJ、2048×2048 PNG を出力。
+4. `js/backfill.js`: エッジ切断で生じた穴を、奥側エッジのみから深度（disparity平面フィット+ラプラス平滑化）と色（プルプッシュ+拡散）で伸長し、第2レイヤー（world position + テクスチャ）を生成（PLAN_INPAINT.md）。
+5. `js/viewer.js`: three.js でテクスチャ付きメッシュまたは点群を表示。無効画素と大きな深度段差をまたぐ面を除去。第2レイヤーは `BackfillMesh` として表示・GLB 出力。
+6. `js/download.js` / `js/exr.js`: 元画像、Depth EXR、World Position EXR、Backfill WorldPos EXR / Texture PNG、OBJ、2048×2048 PNG を出力。
 
 ## 実装済み
 
@@ -33,6 +34,7 @@
 - [x] 変換済みメッシュ・テクスチャ・推定元カメラ・現在カメラを含む Scene GLB
 - [x] Depth EXR / World Position EXR / OBJ / PNG の出力
 - [x] GitHub Pages デプロイ設定
+- [x] 遮蔽穴インペイント（Fill Occlusion / Fill Margin、第2レイヤー表示、Backfill EXR/PNG、GLB `BackfillMesh`）— 実画像でのブラウザ検証は未実施
 
 ## カメラ仕様
 

@@ -9,6 +9,7 @@
     let currentWP = null;          // { data, width, height } (モデル解像度)
     let currentBaseName = 'mesh';
     let currentNormalMap = null;   // tangent-space RGBA8 normal map
+    let currentBackfill = null;    // 遮蔽穴インペイントの第2レイヤー（Backfill.generate）
     let modelReady = false;
     let lastNumTokens = 1800;
     let currentModelKey = 'vitb';
@@ -45,6 +46,10 @@
         ['dlImage', 'dlDepth', 'dlNormal', 'dlWorldPos', 'exportOBJ', 'exportGLB', 'exportPNG', 'recompute'].forEach(id => {
             $(id).disabled = !on;
         });
+        if (!on) {
+            $('dlBackfillWP').disabled = true;
+            $('dlBackfillTex').disabled = true;
+        }
     }
 
     // ---- 画像読み込み ----
@@ -127,6 +132,38 @@
             currentNormalMap
         );
         setDownloadEnabled(true);
+        updateBackfill();
+    }
+
+    // 遮蔽穴インペイント（backfill.js）。推論・主レイヤーは再計算しない軽量パス。
+    function updateBackfill() {
+        if (!currentPost || !currentImageData) return;
+        currentBackfill = null;
+        if ($('fillOcclusion').checked) {
+            const { depth, mask, width, height } = currentPost;
+            const cleaned = currentPost.cleanedMask;
+            const applyMask = $('applyMask').checked;
+            // 埋め対象 = エッジ切断で無効化された画素のみ
+            //（applyMask による空/背景除去や元々の無効深度は対象外）
+            const holeMask = new Uint8Array(width * height);
+            for (let i = 0; i < holeMask.length; i++) {
+                const base = Number.isFinite(depth[i]) && depth[i] > 0 &&
+                    (!applyMask || !mask || mask[i] !== 0);
+                holeMask[i] = base && !cleaned[i] ? 1 : 0;
+            }
+            currentBackfill = Backfill.generate({
+                depth,
+                validMask: cleaned,
+                holeMask,
+                intrinsics: currentPost.intrinsics,
+                color: currentImageData,
+                width,
+                height
+            }, { marginPx: parseInt($('fillMargin').value, 10) });
+        }
+        Viewer.setBackfillLayer(currentBackfill);
+        $('dlBackfillWP').disabled = !currentBackfill;
+        $('dlBackfillTex').disabled = !currentBackfill;
     }
 
     // ---- メイン処理: 画像 → 推論 → 表示 ----
@@ -273,6 +310,11 @@
         });
         $('edgeThreshold').addEventListener('change', recompute);
         $('applyMask').addEventListener('change', recompute);
+        $('fillOcclusion').addEventListener('change', updateBackfill);
+        $('fillMargin').addEventListener('input', (e) => {
+            $('fillMarginValue').textContent = e.target.value;
+        });
+        $('fillMargin').addEventListener('change', updateBackfill);
         $('recompute').addEventListener('click', () => {
             // モデル変更 or num_tokens が変わっていれば再推論、そうでなければ後処理のみ
             if ((!modelReady || getNumTokens() !== lastNumTokens) && currentImageData) {
@@ -298,6 +340,18 @@
             if (!currentWP) return;
             const aligned = Viewer.getAlignedWorldPositions(currentWP.data);
             Downloader.saveWorldPosEXR(aligned, currentWP.width, currentWP.height, currentBaseName, true);
+        });
+        $('dlBackfillWP').addEventListener('click', () => {
+            if (!currentBackfill) return;
+            const aligned = Viewer.getAlignedWorldPositions(currentBackfill.worldPos);
+            Downloader.saveWorldPosEXR(
+                aligned, currentBackfill.width, currentBackfill.height,
+                `${currentBaseName}_backfill`, true
+            );
+        });
+        $('dlBackfillTex').addEventListener('click', () => {
+            if (!currentBackfill) return;
+            Downloader.saveTexturePNG(currentBackfill.colorTex, `${currentBaseName}_backfill.png`);
         });
         $('exportOBJ').addEventListener('click', Viewer.exportOBJ);
         $('exportGLB').addEventListener('click', Viewer.exportGLB);

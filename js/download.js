@@ -45,5 +45,20 @@ const Downloader = (function () {
         }, 'image/png');
     }
 
-    return { saveBlob, saveOriginal, saveDepthEXR, saveWorldPosEXR, saveNormalPNG };
+    // RGBA テクスチャ（backfill 等）を PNG 保存。alpha は有効領域を表す
+    function saveTexturePNG(tex, filename) {
+        if (!tex) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = tex.width;
+        canvas.height = tex.height;
+        const context = canvas.getContext('2d');
+        context.putImageData(
+            new ImageData(new Uint8ClampedArray(tex.data), tex.width, tex.height), 0, 0
+        );
+        canvas.toBlob((blob) => {
+            if (blob) saveBlob(blob, filename);
+        }, 'image/png');
+    }
+
+    return { saveBlob, saveOriginal, saveDepthEXR, saveWorldPosEXR, saveNormalPNG, saveTexturePNG };
 })();
