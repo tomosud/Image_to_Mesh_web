@@ -183,7 +183,8 @@ Single-image geometry is inherently ambiguous. Transparent objects, mirrors, thi
 
 Use a local HTTP server instead of opening `index.html` through `file://`.
 
-On Windows, run `run.bat`, then open:
+On Windows, run `run.bat`. It opens the server in your browser and automatically
+uses the next available port if `8000` is busy. The default URL is:
 
 ```text
 http://localhost:8000/
