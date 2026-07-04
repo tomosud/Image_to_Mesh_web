@@ -187,6 +187,52 @@ Backfill.generate({ depth, cleanedMask, intrinsics, colorWH, width, height }, { 
 
 ---
 
+## 8.5 確定実装スナップショット（2026-07-04, commit 20d4e14 時点）
+
+この状態を安定版として保存し、以後の改善はここを基準に行う。
+以下はコードから起こした「実際に動いているもの」の記録（計画との差分含む）。
+
+### パイプライン（main.js recompute）
+1. `MogePost.process` → depth / points / intrinsics / mask（メトリック、再投影済み）
+2. `MogePost.cleanDepthMask(depth, mask, W, H, EdgeThreshold, applyMask)`
+   → **エッジ両側の画素を無効化**（削除ベース。Edge Threshold UI 既定 0.220、1.0=Off）
+3. NormalMap 生成 → `WorldPos.fromCameraPoints`（無効画素は NaN）
+4. `Viewer.setData` — 面除去は「NaN 面」+「相対深度段差 > **10%（固定）**」
+5. `updateBackfill` — `holeMask = !cleanedMask`（ジオメトリの無い全画素）を渡して
+   `Backfill.generate(..., { marginPx: FillMargin UI 既定128 })` → `Viewer.setBackfillLayer`
+
+### Backfill.generate（backfill.js）の実処理と定数
+- **jumpTol = 0.10（固定。UI 非連動）**
+- 1a. 種: 有効画素対の相対段差 > jumpTol の**奥側**画素
+- 1b. 穴（無効画素）の連結成分ごとに境界リングを幾何平均しきい値で near/far 分類
+  （リング≥8px・dmax/dmin ≥ 1+jumpTol が条件）、far を種に追加
+- 1c. 襟: 種から奥面沿いの有効画素を `COLLAR_PX=4` px 層に取り込む（継ぎ目を主メッシュの裏に隠す）
+- 2. 種から `marginPx` 上限の BFS。種の背景 disparity（bgDisp）を伝播し、
+  進入先は「穴」または「明確な前景（disp > bgDisp×(1+jumpTol)）」のみ
+- 2b. bgDisp を領域内で min 拡散（Jacobi `DEEPEN_PASSES=12`）→ 目標を「近傍で最も奥の種」へ
+- 3. disparity を bgDisp で初期化し、種を Dirichlet として Gauss-Seidel **40 反復**。
+  反復内で毎回 `disp ∈ [bgDisp/4, bgDisp]` にクランプ（**自分の種より手前に出ない**保証）
+- 4. `depthOut = (1/disp) × (1 + PUSH_BASE + PUSH_BACK × min(dist, RAMP_PX)/RAMP_PX)`
+  （`PUSH_BASE=0.015` / `PUSH_BACK=0.04` / `RAMP_PX=12`。種・襟は元depth×(1+PUSH_BASE)）
+- 5. 色: **種の色のみ**を起点にプルプッシュ（ピラミッド）→ 生成領域内で拡散 3 反復。
+  出力テクスチャの RGB は全画素保持（にじみ防止）、alpha=有効領域
+- 6. 既存 intrinsics で再投影 → `WorldPos.fromCameraPoints`（主レイヤーと同一座標系）
+
+### Viewer / 出力
+- 第2レイヤーは `BackfillMesh`（モデル解像度 1:1 グリッド、**NaN 面のみ除去**）。
+  Points / Wireframe / Unlit / No Color に追従。GLB に整列済みで同梱。
+- DL: `Backfill WorldPos (EXR)`（水平グリッド整列共有）/ `Backfill Texture (PNG)`（alpha=有効）
+
+### この状態の既知の課題（今後の改善対象）
+1. エッジ処理が削除ベースのため「削れ過ぎ vs 伸び」のトレードオフが残る
+   （スナップ方式の再挑戦は下記ログ「EdgeSnap 実験のロールバック」の教訓を前提に）
+2. backfill の色はプルプッシュ由来のスジ状のボケ（覗き込み時に見える）
+3. 正面ビューでも面カットのスリットや mask 境界画素が細い黒線として見える場合がある
+4. しきい値の役割分担: cleanDepthMask=UI / 面カット=0.10固定 / backfill種=0.10固定。
+   **互いに連動させないこと**（連動させて退行した実績あり）
+
+---
+
 ## 9. 実装経緯（ログ）
 
 ### 2026-07-04 Phase 1 実装
@@ -273,6 +319,32 @@ Backfill.generate({ depth, cleanedMask, intrinsics, colorWH, width, height }, { 
 - **デフォルト変更**: Edge Threshold `0.970 → 0.220`、Fill Margin `48 → 128`（ユーザー指定）。
   README の既定値記述も更新。
 - 合成テスト A/B とも PASS を維持（襟の分 seeds/layer は増加）。
+
+---
+
+### 2026-07-04 EdgeSnap 実験のロールバック（このコミット状態へ復帰）
+ここまでの状態（backfill + 襟 + 基礎押し込み、Edge Threshold 0.220 / Fill Margin 128）を
+良好と確認した後、「エッジのランプ画素を削除せず手前/奥へスナップして分離する」
+EdgeSnap（edgesnap.js）を実装したが、**未コミットのまま全て破棄してこの状態へ戻した**。
+記録として要点を残す:
+
+- **狙い**: cleanDepthMask の画素削除（削れ過ぎ）と面カットのみ（伸びる）の
+  トレードオフ解消。エッジ列（例 2.39,2.45,2.43,3.08,4.57,5.10,5.12）の中間画素を
+  近い側の台地へ吸着 → エッジが鋭くなり面カットがそこだけを切る、という構成。
+- **有効だった要素**: 深度の対数距離での帰属判定／台地（平坦コア）検出＋
+  ギャップ検査による床の保護／吸着先は平坦な台地に限る（偽台地への吸着防止）／
+  スナップ画素の表示色をシフトコピーで入れ直す patchColor。合成テストと
+  実プロファイルでは仕様どおり動作した。
+- **失敗と教訓**:
+  1. 「未解決画素の面外し＋浸食」は低しきい値でノイズ連鎖し大穴を開けた（撤回）。
+  2. **backfill の種検出・面カットしきい値をスライダーに連動させたのが最大の退行**。
+     埋め残し・前に出る板の原因になった。各処理のしきい値は役割ごとに独立させること。
+  3. backfill メッシュへの面カット追加も逆効果（埋め面内部の正常な段差まで切れる）。
+  4. 実画像（茂み等の乱雑な背景・幅広ランプ）では窓ベースの局所判定が及ばない
+     ケースが残り、変更が積み重なって切り分け困難になった。
+- **再挑戦する場合**: EdgeSnap を単独モジュール・独立トグル（既定OFF）として追加し、
+  既存パイプライン（cleanDepthMask / 面カット0.10固定 / backfill jumpTol 0.10固定）を
+  一切変えずに、実画像で1ステップずつ検証してから結線すること。
 
 ---
 
