@@ -128,6 +128,10 @@ const Backfill = (function () {
         // viewer.removeInvalidAndDiscontinuousFaces の relativeDepthThreshold と同じ既定値。
         // これを超える段差で面が除去され隙間が開くため、同じ基準で種を検出する。
         const jumpTol = (opts && opts.jumpTol) || 0.10;
+        const COLLAR_PX = 4;      // 奥面への食い込み幅（継ぎ目を主メッシュの裏に隠す）
+        const PUSH_BASE = 0.015;  // 層全体の基礎押し込み（z-fighting とクラック回避）
+        const PUSH_BACK = 0.04;   // 種から離れるほど追加で奥へ押し込む最大比率
+        const RAMP_PX = 12;       // PUSH_BACK がフルに効くまでの距離
         const N = W * H;
 
         // ---- 1a. 種の検出: 有効画素同士の深度不連続エッジの「奥側」画素 ----
@@ -192,6 +196,34 @@ const Backfill = (function () {
             return null;
         }
 
+        // ---- 1c. 襟(collar): 種から奥面に沿って有効画素を数px層へ取り込む ----
+        // 種の1px鎖だけだと斜めの段差でピンホールが残り、主メッシュと完全同位置の
+        // ためクラックも見え得る。奥面へ COLLAR_PX 食い込ませて重ね、層全体を
+        // わずかに奥へ置く（PUSH_BASE、節6）ことで継ぎ目を主メッシュの裏に隠す。
+        {
+            const cdist = new Int32Array(N).fill(-1);
+            let head = 0, tail = 0;
+            for (let i = 0; i < N; i++) if (seed[i]) { cdist[i] = 0; queue[tail++] = i; }
+            while (head < tail) {
+                const i = queue[head++];
+                if (cdist[i] >= COLLAR_PX) continue;
+                const x = i % W, y = (i / W) | 0;
+                const di = 1 / depth[i];
+                for (const [dx, dy] of OFFS) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                    const j = ny * W + nx;
+                    if (cdist[j] >= 0 || !validMask[j]) continue;
+                    // 奥面上（種と同等かそれより奥）のみ。前景へは広げない
+                    if ((1 / depth[j]) > di * (1 + jumpTol)) continue;
+                    cdist[j] = cdist[i] + 1;
+                    seed[j] = 1;
+                    seedCount++;
+                    queue[tail++] = j;
+                }
+            }
+        }
+
         // ---- 2. 種からマージン付き BFS ----
         // 種の背景 disparity を伝播し、「背景より明確に手前の画素」と「穴画素」にのみ潜り込む。
         // これで背景面そのものには広がらず、前景シルエットの裏側だけが生成対象になる。
@@ -226,18 +258,42 @@ const Backfill = (function () {
             console.log('[Backfill] seeds found but nothing to fill', { seedCount });
             return null;
         }
+        const synthList = [];
+        for (let i = 0; i < N; i++) if (synth[i]) synthList.push(i);
+
+        // ---- 2b. 奥側優先の深化 ----
+        // bgDisp を領域内で min 拡散（Jacobi、1パス=1px）し、内部の目標深度を
+        // 「最寄りの種」ではなく「近傍で最も奥の種」へ寄せる。手前の中景（茂み等）の
+        // 種に引っ張られて生成面が前へ突き出すのを抑える。
+        const DEEPEN_PASSES = 12;
+        for (let p = 0; p < DEEPEN_PASSES; p++) {
+            const prev = bgDisp.slice();
+            let changed = false;
+            for (const i of synthList) {
+                const x = i % W, y = (i / W) | 0;
+                let m = prev[i];
+                for (const [dx, dy] of OFFS) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                    const j = ny * W + nx;
+                    if (!synth[j] && !seed[j]) continue;
+                    if (prev[j] < m) m = prev[j];
+                }
+                if (m < bgDisp[i]) { bgDisp[i] = m; changed = true; }
+            }
+            if (!changed) break;
+        }
 
         // ---- 3. 深度の伸長 ----
-        // 初期値 = BFS で伝播済みの「自分の種（奥側エッジ）の disparity」（=奥側エッジの等深度延長）。
+        // 初期値 = 深化済み bgDisp（=近傍で最も奥のエッジの等深度延長）。
         // 種を Dirichlet とする Gauss-Seidel で滑らかに繋ぎ、各画素は反復内で
-        // 「自分の種より手前に出ない・種の4倍より奥へ行かない」ようクランプする。
+        // 「目標より手前に出ない・種の4倍より奥へ行かない」ようクランプする。
         // 平面フィトは廃止: 生成領域が繋がって1成分になると、深度の異なる種
         // （壁・机・天井）に1枚の平面が張られ、場所により手前へ飛び出すため。
         const disp = new Float32Array(N);
-        const synthList = [];
         for (let i = 0; i < N; i++) {
             if (seed[i]) { disp[i] = 1 / depth[i]; continue; }
-            if (synth[i]) { synthList.push(i); disp[i] = bgDisp[i]; }
+            if (synth[i]) disp[i] = bgDisp[i];
         }
         for (let it = 0; it < 40; it++) {
             const forward = (it % 2) === 0;
@@ -260,8 +316,13 @@ const Backfill = (function () {
                 disp[i] = v;
             }
         }
+        // 層全体を PUSH_BASE 分、さらに種から離れるほど PUSH_BACK 分奥へ押し込む。
+        // 継ぎ目は襟（1c）が主メッシュの裏に隠すため、基礎押し込みしても切れ目は見えない。
         const depthOut = new Float32Array(N);
-        for (const i of synthList) depthOut[i] = 1 / disp[i];
+        for (const i of synthList) {
+            const t = Math.min(dist[i], RAMP_PX) / RAMP_PX;
+            depthOut[i] = (1 / disp[i]) * (1 + PUSH_BASE + PUSH_BACK * t);
+        }
 
         // ---- 5. 色の伸長: プルプッシュ + 拡散平滑化 ----
         const colorBase = resampleColor(input.color, W, H);
@@ -301,12 +362,13 @@ const Backfill = (function () {
         }
 
         // ---- 6. world position 化(既存パスを流用) ----
-        // 種は元 depth をそのまま使い、主レイヤーと頂点座標を一致させる（クラック防止）
+        // 種・襟は元 depth を PUSH_BASE 分だけ奥へ。主メッシュのすぐ裏に重なり、
+        // 襟の食い込み幅の分だけ視差が付いても継ぎ目が見えない。
         const camPoints = new Float32Array(N * 3);
         const { fx, fy, cx, cy } = intrinsics;
         for (let i = 0; i < N; i++) {
             if (!layerMask[i]) continue;
-            const z = seed[i] ? depth[i] : depthOut[i];
+            const z = seed[i] ? depth[i] * (1 + PUSH_BASE) : depthOut[i];
             const u01 = ((i % W) + 0.5) / W;
             const v01 = (((i / W) | 0) + 0.5) / H;
             camPoints[i * 3] = (u01 - cx) / fx * z;

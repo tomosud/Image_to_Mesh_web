@@ -140,16 +140,14 @@
         if (!currentPost || !currentImageData) return;
         currentBackfill = null;
         if ($('fillOcclusion').checked) {
-            const { depth, mask, width, height } = currentPost;
+            const { depth, width, height } = currentPost;
             const cleaned = currentPost.cleanedMask;
-            const applyMask = $('applyMask').checked;
-            // 埋め対象 = エッジ切断で無効化された画素のみ
-            //（applyMask による空/背景除去や元々の無効深度は対象外）
+            // 埋め対象 = ジオメトリが無い全画素（エッジ切断 + mask除去 + 無効深度）。
+            // 種（奥側エッジ）からマージン内に届く範囲しか埋まらないため、空などの
+            // 大きな除去領域は自然に対象外になる。
             const holeMask = new Uint8Array(width * height);
             for (let i = 0; i < holeMask.length; i++) {
-                const base = Number.isFinite(depth[i]) && depth[i] > 0 &&
-                    (!applyMask || !mask || mask[i] !== 0);
-                holeMask[i] = base && !cleaned[i] ? 1 : 0;
+                holeMask[i] = cleaned[i] ? 0 : 1;
             }
             currentBackfill = Backfill.generate({
                 depth,

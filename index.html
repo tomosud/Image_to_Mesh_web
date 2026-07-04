@@ -90,9 +90,9 @@
                     <button id="recompute" disabled>Recompute</button>
                 </div>
                 <div class="control-group">
-                    <label>Edge Threshold: <span id="edgeThresholdValue">0.970</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Removes geometry around sudden depth changes. Lower values remove more boundary points; higher values preserve more geometry. Off disables depth-edge cleanup." aria-label="Edge Threshold help">?</span></label>
+                    <label>Edge Threshold: <span id="edgeThresholdValue">0.220</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Removes geometry around sudden depth changes. Lower values remove more boundary points; higher values preserve more geometry. Off disables depth-edge cleanup." aria-label="Edge Threshold help">?</span></label>
                     <div class="slider-container">
-                        <input type="range" id="edgeThreshold" min="0.005" max="1.000" step="0.005" value="0.970">
+                        <input type="range" id="edgeThreshold" min="0.005" max="1.000" step="0.005" value="0.220">
                     </div>
                     <div class="control-help">Smaller values remove more points. Set 1.000 to disable all depth-edge cleanup.</div>
                 </div>
@@ -115,9 +115,9 @@
                     </div>
                 </div>
                 <div class="control-group">
-                    <label>Fill Margin (px): <span id="fillMarginValue">48</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="How far the background layer extends behind foreground silhouettes. Larger values tolerate more camera movement but extrapolate more." aria-label="Fill Margin help">?</span></label>
+                    <label>Fill Margin (px): <span id="fillMarginValue">128</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="How far the background layer extends behind foreground silhouettes. Larger values tolerate more camera movement but extrapolate more." aria-label="Fill Margin help">?</span></label>
                     <div class="slider-container">
-                        <input type="range" id="fillMargin" min="8" max="128" step="4" value="48">
+                        <input type="range" id="fillMargin" min="8" max="128" step="4" value="128">
                     </div>
                 </div>
                 <div class="control-group dl-group">
@@ -177,10 +177,10 @@
     <script src="js/moge_post.js?v=20260620-13"></script>
     <script src="js/worldpos.js?v=20260620-13"></script>
     <script src="js/normalmap.js?v=20260620-13"></script>
-    <script src="js/backfill.js?v=20260704-3"></script>
+    <script src="js/backfill.js?v=20260704-5"></script>
     <script src="js/viewer.js?v=20260704-1"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260704-1"></script>
-    <script src="js/main.js?v=20260704-1"></script>
+    <script src="js/main.js?v=20260704-2"></script>
 </body>
 </html>

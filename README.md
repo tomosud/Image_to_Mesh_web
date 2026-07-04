@@ -89,7 +89,7 @@ Controls the internal inference resolution.
 Controls removal of vertices and faces around sharp depth discontinuities.
 
 - Range: `0.005`–`1.000`
-- Default: `0.970`
+- Default: `0.220`
 - Lower values remove more depth-edge geometry
 - Higher values preserve more geometry but may leave stretched surfaces
 - `1.000` displays as `Off` and disables all depth-edge cleanup
