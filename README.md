@@ -99,10 +99,10 @@ Upsamples the metric depth after MoGe-2 inference and before geometry, edge snap
 - Target resolution follows the input image aspect ratio
 - Long edge is capped at `2048` px
 - WebGPU applies an RGB-guided joint bilateral filter
-- If WebGPU is unavailable, the status line clearly reports the fallback and the tool uses the selected initial resize mode
+- If WebGPU is unavailable, the status line clearly reports the fallback and the tool uses the internal initial resize mode
 - Depth stays as float32 meters during processing
 
-Use the radius and sigma controls to balance RGB edge alignment against texture-copy artifacts.
+Advanced high-resolution depth parameters are kept as internal defaults and are not shown in the main UI.
 
 ### Edge Threshold
 

@@ -180,6 +180,7 @@ const Viewer = (function () {
             !currentViewerOptions.disableDepthEdgeCleanup
         );
         // 段差カットで孤立した小さい/細いポリ（フリンジのちぎれ等）を除去する
+        erodeBoundaryFaces(geometry, 1);
         removeSmallFaceComponents(geometry, getSmallComponentMinFaces());
         // シーム分割で頂点が追加されると attribute 配列が差し替わる
         const finalPositions = geometry.attributes.position.array;
@@ -316,6 +317,7 @@ const Viewer = (function () {
         }
         removeInvalidAndDiscontinuousFaces(geometry, positions, true, dispGapThreshold);
         // 視差カットで孤立した小さい/細い fill 片（面張りの元）を除去する
+        erodeBoundaryFaces(geometry, 1);
         removeSmallFaceComponents(geometry, getSmallComponentMinFaces());
         if (!geometry.index || geometry.index.count === 0) { geometry.dispose(); return; }
         updateFiniteGeometryBounds(geometry, positions);
@@ -528,6 +530,54 @@ const Viewer = (function () {
         }
 
         geometry.setIndex(kept);
+    }
+
+    // 境界エッジの頂点に触る face を指定回数削る。Small Component Faces の前に1層削ることで、
+    // 1ポリ幅でつながった細いブリッジを連結成分から切り離すテスト用処理。
+    function erodeBoundaryFaces(geometry, passes) {
+        if (!geometry.index || passes <= 0) return;
+        for (let pass = 0; pass < passes; pass++) {
+            const idx = geometry.index.array;
+            const nF = idx.length / 3;
+            if (nF === 0) return;
+
+            const edgeUse = new Map();
+            for (let f = 0; f < nF; f++) {
+                const b = f * 3;
+                const a = idx[b], c = idx[b + 1], d = idx[b + 2];
+                addEdgeUse(edgeUse, a, c);
+                addEdgeUse(edgeUse, c, d);
+                addEdgeUse(edgeUse, d, a);
+            }
+
+            const boundaryVertex = new Uint8Array(geometry.attributes.position.count);
+            edgeUse.forEach((count, key) => {
+                if (count !== 1) return;
+                const sep = key.indexOf(',');
+                boundaryVertex[Number(key.slice(0, sep))] = 1;
+                boundaryVertex[Number(key.slice(sep + 1))] = 1;
+            });
+
+            let removed = 0;
+            const kept = [];
+            for (let f = 0; f < nF; f++) {
+                const b = f * 3;
+                const a = idx[b], c = idx[b + 1], d = idx[b + 2];
+                if (boundaryVertex[a] || boundaryVertex[c] || boundaryVertex[d]) {
+                    removed++;
+                } else {
+                    kept.push(a, c, d);
+                }
+            }
+            if (removed === 0) return;
+            geometry.setIndex(kept);
+        }
+    }
+
+    function addEdgeUse(edgeUse, a, b) {
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        const key = `${lo},${hi}`;
+        edgeUse.set(key, (edgeUse.get(key) || 0) + 1);
     }
 
     // 面カット後に孤立して残る「小さい/細い」連結成分を除去する。face を頂点共有で

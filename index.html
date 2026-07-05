@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image to Mesh — World Position Viewer</title>
     <link rel="icon" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3e%3cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3e%3c/svg%3e">
-    <link rel="stylesheet" href="css/style.css?v=20260705-6">
+    <link rel="stylesheet" href="css/style.css?v=20260705-7">
 </head>
 <body>
     <div id="container">
@@ -95,63 +95,42 @@
                             <input type="checkbox" id="depthUpsampleEnable" checked>
                             High-Res Depth
                         </label>
-                        <span class="help-tip" tabindex="0" role="note" data-tooltip="Open the guide below for parameter details." aria-label="High-Res Depth help">?</span>
+                        <span class="help-tip" tabindex="0" role="note" data-tooltip="Upsamples metric depth to the input image aspect ratio, capped at 2048 px on the long edge. Advanced parameters use internal defaults." aria-label="High-Res Depth help">?</span>
                     </div>
                     <div id="depthUpsampleStatus" class="control-status">Depth upsampling: pending</div>
-                    <details class="control-details">
-                        <summary>Depth parameter guide</summary>
-                        <dl>
-                            <dt>High-Res Depth</dt>
-                            <dd>Upsamples metric depth to the input image aspect ratio, capped at 2048 px on the long edge.</dd>
-                            <dt>Initial Depth Resize</dt>
-                            <dd>Creates the first high-res depth. Bilinear is smoother; Nearest keeps harder steps for sharper edge-guided filtering.</dd>
-                            <dt>JBU Radius</dt>
-                            <dd>Pixel radius sampled by the WebGPU joint bilateral filter. Larger values smooth wider areas and cost more.</dd>
-                            <dt>Sigma Space</dt>
-                            <dd>Controls distance falloff inside the radius. Lower values keep the filter more local.</dd>
-                            <dt>Sigma Color</dt>
-                            <dd>Controls how strongly RGB edges block depth mixing. Lower values preserve image edges more aggressively.</dd>
-                            <dt>Sigma Depth</dt>
-                            <dd>Controls how strongly depth differences block mixing, in meters. Lower values preserve depth discontinuities.</dd>
-                            <dt>Treat 0 depth as invalid</dt>
-                            <dd>Excludes zero depth from filtering. Keep this on unless zero is intentionally valid depth.</dd>
-                            <dt>Invalid Depth Value</dt>
-                            <dd>Optional exact sentinel depth to exclude, such as -1. NaN, Infinity, and negative depths are always invalid.</dd>
-                        </dl>
-                    </details>
                 </div>
-                <div class="control-group">
+                <div class="control-group hidden-control">
                     <label>Initial Depth Resize</label>
                     <select id="depthInitialMode">
                         <option value="bilinear" selected>Bilinear</option>
                         <option value="nearest">Nearest</option>
                     </select>
                 </div>
-                <div class="control-group">
+                <div class="control-group hidden-control">
                     <label>JBU Radius (px): <span id="depthUpsampleRadiusValue">3</span></label>
                     <div class="slider-container">
                         <input type="range" id="depthUpsampleRadius" min="1" max="8" step="1" value="3">
                     </div>
                 </div>
-                <div class="control-group">
+                <div class="control-group hidden-control">
                     <label>Sigma Space: <span id="depthSigmaSpaceValue">2.0</span></label>
                     <div class="slider-container">
                         <input type="range" id="depthSigmaSpace" min="0.5" max="8.0" step="0.5" value="2.0">
                     </div>
                 </div>
-                <div class="control-group">
+                <div class="control-group hidden-control">
                     <label>Sigma Color: <span id="depthSigmaColorValue">0.080</span></label>
                     <div class="slider-container">
                         <input type="range" id="depthSigmaColor" min="0.005" max="0.300" step="0.005" value="0.080">
                     </div>
                 </div>
-                <div class="control-group">
+                <div class="control-group hidden-control">
                     <label>Sigma Depth (m): <span id="depthSigmaDepthValue">0.15</span></label>
                     <div class="slider-container">
                         <input type="range" id="depthSigmaDepth" min="0.01" max="1.00" step="0.01" value="0.15">
                     </div>
                 </div>
-                <div class="control-group">
+                <div class="control-group hidden-control">
                     <label class="chk">
                         <input type="checkbox" id="depthTreatZeroInvalid" checked>
                         Treat 0 depth as invalid
@@ -172,11 +151,6 @@
                         <input type="range" id="snapWidth" min="1" max="32" step="1" value="8">
                     </div>
                     <div class="control-help">Each pass lets a stable near/far depth area claim adjacent marked edge pixels. Higher values can clean thicker detected ramps; pixels not reached within this limit keep their original depth.</div>
-                </div>
-                <div class="control-group">
-                    <label>Small Component Faces <span class="help-tip" tabindex="0" role="note" data-tooltip="Removes isolated mesh or backfill face islands smaller than this face count after depth-edge cutting. Set 0 to keep all islands." aria-label="Small Component Faces help">?</span></label>
-                    <input type="number" id="smallComponentFaces" min="0" step="1" value="64">
-                    <div class="control-help">Applies to both the main mesh and backfill mesh. Higher values remove larger isolated fragments.</div>
                 </div>
                 <div class="control-group">
                     <label>Sky / Masked Area <span class="help-tip" tabindex="0" role="note" data-tooltip="MoGe-2 marks sky and uncertain regions as invalid. Sky Backdrop keeps those pixels and places them on a flat plane far behind the scene (2x the deepest valid point, at least 100m). Apply Mask OFF trusts the model's raw depth there instead. Apply Mask ON removes those regions, leaving holes." aria-label="Sky / Masked Area help">?</span></label>
@@ -201,25 +175,33 @@
                         <input type="range" id="fillMargin" min="0.5" max="50" step="0.5" value="25">
                     </div>
                 </div>
-                <div class="control-group">
-                    <label>Backfill Parallax Cut: <span id="backfillParallaxCutValue">0.50x</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Backfill mesh face cut threshold as a multiplier of the scene median disparity. Higher values keep more backfill faces connected; lower values cut foreground-facing smears more aggressively." aria-label="Backfill Parallax Cut help">?</span></label>
-                    <div class="slider-container">
-                        <input type="range" id="backfillParallaxCut" min="0.05" max="2.00" step="0.05" value="0.50">
+                <details class="control-details other-controls">
+                    <summary>Other</summary>
+                    <div class="control-group">
+                        <label>Small Component Faces <span class="help-tip" tabindex="0" role="note" data-tooltip="Removes isolated mesh or backfill face islands smaller than this face count after depth-edge cutting. Set 0 to keep all islands." aria-label="Small Component Faces help">?</span></label>
+                        <input type="number" id="smallComponentFaces" min="0" step="1" value="64">
+                        <div class="control-help">Applies to both the main mesh and backfill mesh. Higher values remove larger isolated fragments.</div>
                     </div>
-                    <div class="control-help">Cuts a backfill face when its disparity gap is larger than this value times the median scene disparity.</div>
-                </div>
-                <div class="control-group">
-                    <label>Backfill Front Clamp: <span id="backfillFrontClampValue">1.00x</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Maximum generated disparity relative to the assigned background edge. 1.00 prevents generated fill from moving closer than its edge; lower pushes it farther back; higher allows protrusion." aria-label="Backfill Front Clamp help">?</span></label>
-                    <div class="slider-container">
-                        <input type="range" id="backfillFrontClamp" min="0.50" max="1.50" step="0.05" value="1.00">
+                    <div class="control-group">
+                        <label>Backfill Parallax Cut: <span id="backfillParallaxCutValue">0.50x</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Backfill mesh face cut threshold as a multiplier of the scene median disparity. Higher values keep more backfill faces connected; lower values cut foreground-facing smears more aggressively." aria-label="Backfill Parallax Cut help">?</span></label>
+                        <div class="slider-container">
+                            <input type="range" id="backfillParallaxCut" min="0.05" max="2.00" step="0.05" value="0.50">
+                        </div>
+                        <div class="control-help">Cuts a backfill face when its disparity gap is larger than this value times the median scene disparity.</div>
                     </div>
-                </div>
-                <div class="control-group">
-                    <label>Backfill Far Clamp: <span id="backfillFarClampValue">4.0x</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Maximum generated depth relative to the assigned background edge. Larger values allow deeper extrapolation; smaller values keep fill closer to the edge depth." aria-label="Backfill Far Clamp help">?</span></label>
-                    <div class="slider-container">
-                        <input type="range" id="backfillFarClamp" min="1.00" max="16.00" step="0.25" value="4.00">
+                    <div class="control-group">
+                        <label>Backfill Front Clamp: <span id="backfillFrontClampValue">1.00x</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Maximum generated disparity relative to the assigned background edge. 1.00 prevents generated fill from moving closer than its edge; lower pushes it farther back; higher allows protrusion." aria-label="Backfill Front Clamp help">?</span></label>
+                        <div class="slider-container">
+                            <input type="range" id="backfillFrontClamp" min="0.50" max="1.50" step="0.05" value="1.00">
+                        </div>
                     </div>
-                </div>
+                    <div class="control-group">
+                        <label>Backfill Far Clamp: <span id="backfillFarClampValue">4.0x</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Maximum generated depth relative to the assigned background edge. Larger values allow deeper extrapolation; smaller values keep fill closer to the edge depth." aria-label="Backfill Far Clamp help">?</span></label>
+                        <div class="slider-container">
+                            <input type="range" id="backfillFarClamp" min="1.00" max="16.00" step="0.25" value="4.00">
+                        </div>
+                    </div>
+                </details>
                 <div class="control-group dl-group">
                     <div class="dl-title">Downloads</div>
                     <button id="dlImage" disabled>Original</button>
@@ -283,7 +265,7 @@
     <script src="js/worldpos.js?v=20260620-13"></script>
     <script src="js/normalmap.js?v=20260620-13"></script>
     <script src="js/backfill.js?v=20260705-6"></script>
-    <script src="js/viewer.js?v=20260705-17"></script>
+    <script src="js/viewer.js?v=20260705-18"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260705-1"></script>
     <script src="js/main.js?v=20260705-13"></script>

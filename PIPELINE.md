@@ -186,9 +186,9 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 |---|---|
 | Model / Quality (`num_tokens`) | 0 |
 | High-Res Depth | 2 |
-| Initial Depth Resize | 2 |
-| JBU Radius / Sigma Space / Sigma Color / Sigma Depth | 2 |
-| Treat 0 depth as invalid / Invalid Depth Value | 2 |
+| Initial Depth Resize | 2（内部既定値。UI 非表示） |
+| JBU Radius / Sigma Space / Sigma Color / Sigma Depth | 2（内部既定値。UI 非表示） |
+| Treat 0 depth as invalid / Invalid Depth Value | 2（内部既定値。UI 非表示） |
 | Edge Threshold | 6（`1.000`=Off で 6/7 と 9 の depth seam split を無効化） |
 | Snap Width | 6（吸着の伝播上限。超えた分は元 depth のまま） |
 | Small Component Faces | 9, 10 |

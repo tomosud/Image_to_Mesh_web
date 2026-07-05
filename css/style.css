@@ -297,6 +297,23 @@ button:disabled {
     color: rgba(255, 255, 255, 0.76);
 }
 
+.control-details .control-group {
+    padding: 0 9px;
+    margin-bottom: 12px;
+}
+
+.control-details .control-group:first-of-type {
+    padding-top: 2px;
+}
+
+.control-details .control-group:last-child {
+    margin-bottom: 9px;
+}
+
+.other-controls {
+    margin-bottom: 15px;
+}
+
 #adjustHorizontalGrid.active {
     border-color: var(--accent);
     background: rgba(102, 126, 234, 0.35);

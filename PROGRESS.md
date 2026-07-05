@@ -35,7 +35,7 @@
 - Quality (`num_tokens`): `1800`
 - High-Res Depth: ON
 - High-Res Depth long edge: `2048px`
-- Initial Depth Resize: `Bilinear`
+- Initial Depth Resize: `Bilinear` (internal, UI hidden)
 - Edge Threshold: `0.010`
 - Snap Width: `8`
 - Small Component Faces: `64`
