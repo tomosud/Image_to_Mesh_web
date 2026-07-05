@@ -86,17 +86,25 @@ Controls the internal inference resolution.
 
 ### Edge Threshold
 
-Controls removal of vertices and faces around sharp depth discontinuities.
+Controls detection of sharp depth discontinuities. Instead of deleting geometry, the soft ramp pixels around each detected edge are snapped to the surfaces on both sides (removing in-between depth values and colors), and the mesh is split at the edge. Both sides extend one cell across the seam, so no hole opens in the front view.
 
 - Range: `0.005`–`1.000`
 - Default: `0.220`
-- Lower values remove more depth-edge geometry
-- Higher values preserve more geometry but may leave stretched surfaces
-- `1.000` displays as `Off` and disables all depth-edge cleanup
+- Lower values detect and split more edges
+- Higher values keep more surfaces connected but may leave stretched geometry
+- `1.000` displays as `Off` and disables edge snapping and splitting
 
 The setting is applied automatically when the slider is released. Model inference is not repeated.
 
-If geometry is missing around object boundaries, raise the value. If long stretched surfaces appear between foreground and background, lower it.
+If surfaces that belong together get split apart, raise the value. If long stretched surfaces appear between foreground and background, lower it.
+
+### Snap Width
+
+Maximum width (in pixels) of the soft depth ramp that is snapped to the neighboring surfaces at a depth edge.
+
+- Range: `1`–`32`
+- Default: `8`
+- Increase if wide or blurred edges still leave stretched geometry
 
 ### Apply Mask
 
@@ -162,13 +170,14 @@ Depth EXR remains in the original camera-depth coordinate system.
 ### Long surfaces stretch across depth boundaries
 
 - Lower **Edge Threshold**.
+- Raise **Snap Width** for wide or blurred edges.
 - Enable **Apply Mask**.
 - Increase Quality if memory permits.
 
-### Too much geometry is missing
+### Too much geometry is missing or split apart
 
 - Raise **Edge Threshold**.
-- Set Edge Threshold to `Off` for no depth-edge cleanup.
+- Set Edge Threshold to `Off` for no edge snapping and splitting.
 - Disable **Apply Mask** if the predicted validity mask removes useful areas.
 
 ### Rotation feels tilted or uses the wrong axis

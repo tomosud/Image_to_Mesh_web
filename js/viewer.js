@@ -126,6 +126,12 @@ const Viewer = (function () {
         const positions = geometry.attributes.position.array;
         const geometryUVs = geometry.attributes.uv.array;
 
+        // EdgeSnap がランプ画素を台地へ吸着した場合、UV も吸着元画素のものへ
+        // 差し替える（テクスチャは不変のまま中間色を消す）。グリッドが point map と
+        // 1:1 のときのみ適用できる。
+        const uvSrcIndex = currentViewerOptions.uvSrcIndex || null;
+        const applyUVSnap = !!uvSrcIndex && meshWidth === width && meshHeight === height;
+
         for (let i = 0; i < positions.length; i += 3) {
             const vertexIndex = i / 3;
             const row = Math.floor(vertexIndex / meshWidth);
@@ -141,6 +147,13 @@ const Viewer = (function () {
             // and last sample to the outer image edges.
             geometryUVs[vertexIndex * 2] = (srcX + 0.5) / width;
             geometryUVs[vertexIndex * 2 + 1] = 1 - (srcY + 0.5) / height;
+            if (applyUVSnap) {
+                const snapSrc = uvSrcIndex[vertexIndex];
+                if (snapSrc >= 0) {
+                    geometryUVs[vertexIndex * 2] = ((snapSrc % width) + 0.5) / width;
+                    geometryUVs[vertexIndex * 2 + 1] = 1 - ((Math.floor(snapSrc / width)) + 0.5) / height;
+                }
+            }
 
             const x0 = Math.floor(srcX);
             const y0 = Math.floor(srcY);
@@ -166,17 +179,20 @@ const Viewer = (function () {
         }
 
         geometry.attributes.position.needsUpdate = true;
-        removeInvalidAndDiscontinuousFaces(
+        splitDiscontinuousFaces(
             geometry,
-            positions,
+            meshWidth,
+            meshHeight,
             !currentViewerOptions.disableDepthEdgeCleanup
         );
-        updateFiniteGeometryBounds(geometry, positions);
+        // シーム分割で頂点が追加されると attribute 配列が差し替わる
+        const finalPositions = geometry.attributes.position.array;
+        updateFiniteGeometryBounds(geometry, finalPositions);
         geometry.computeVertexNormals();
 
         // 頂点カラー（ポイントモード等で使用）
         if (currentColorTexture && !disableColor) {
-            const colors = new Float32Array(positions.length);
+            const colors = new Float32Array(finalPositions.length);
             const uvs = geometry.attributes.uv.array;
             const linearColor = new THREE.Color();
             for (let i = 0; i < uvs.length / 2; i++) {
@@ -320,6 +336,116 @@ const Viewer = (function () {
         controls.minPolarAngle = frontSideOnly ? 0.001 : 0;
         controls.maxPolarAngle = frontSideOnly ? Math.PI * 0.5 - 0.001 : Math.PI;
         controls.target.copy(target);
+    }
+
+    // 主メッシュ用: 深度段差をまたぐセルを「削除」せず「切り離す」。
+    // 段差セルは near/far の2枚のプレートに分割し、各プレートは相手側の角を
+    // 「自分側の深度へ複製した頂点」で置き換えて1セル分延長する。
+    //   2 2 3 4 5 5 →（EdgeSnap 後）2 2 2 5 5 5 → 段差セルは
+    //   手前プレート（正面ビューを隙間なく覆う）と奥プレート（覗き込み時に
+    //   奥面が続いて見える）の両方が所有する。
+    // 複製頂点は同一画素レイ上の移動なので位置は元頂点の比率スケールで正確。
+    // しきい値は従来の面カットと同じ 0.10 固定（Edge Threshold とは非連動）。
+    function splitDiscontinuousFaces(geometry, W, H, splitDepthEdges) {
+        if (!geometry.index) return;
+        const positions = geometry.attributes.position.array;
+        const uvs = geometry.attributes.uv.array;
+        const relativeDepthThreshold = 0.10;
+        const indices = [];
+        const extraPos = [];
+        const extraUV = [];
+        const baseCount = W * H;
+
+        // セル角の並び: 0=左上 1=右上 2=左下 3=右下
+        const cornerIdx = new Int32Array(4);
+        const cornerZ = new Float64Array(4);
+        const adjacentCorners = [[1, 2], [0, 3], [0, 3], [1, 2]];
+        const mapped = new Int32Array(4);
+
+        function addDuplicate(corner, refCorner) {
+            const src = cornerIdx[corner];
+            const ref = cornerIdx[refCorner];
+            const scale = cornerZ[refCorner] / cornerZ[corner];
+            const index = baseCount + extraPos.length / 3;
+            extraPos.push(
+                positions[src * 3] * scale,
+                positions[src * 3 + 1] * scale,
+                positions[src * 3 + 2] * scale
+            );
+            // UV は延長元（同じプレート側）の角からコピーし、境界の中間色を拾わない
+            extraUV.push(uvs[ref * 2], uvs[ref * 2 + 1]);
+            return index;
+        }
+
+        for (let y = 0; y < H - 1; y++) {
+            for (let x = 0; x < W - 1; x++) {
+                const tl = y * W + x;
+                cornerIdx[0] = tl;
+                cornerIdx[1] = tl + 1;
+                cornerIdx[2] = tl + W;
+                cornerIdx[3] = tl + W + 1;
+
+                let finite = true;
+                let zMin = Infinity, zMax = -Infinity;
+                for (let k = 0; k < 4; k++) {
+                    const pi = cornerIdx[k] * 3;
+                    const px = positions[pi], py = positions[pi + 1], pz = positions[pi + 2];
+                    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) {
+                        finite = false;
+                        break;
+                    }
+                    const z = Math.abs(pz);
+                    cornerZ[k] = Math.max(z, 1e-9);
+                    if (z < zMin) zMin = z;
+                    if (z > zMax) zMax = z;
+                }
+                if (!finite) continue;
+
+                const isSeam = splitDepthEdges &&
+                    (zMax - zMin) > relativeDepthThreshold * Math.max(zMin, 1e-6);
+                if (!isSeam) {
+                    // PlaneGeometry と同じ三角形分割: (TL,BL,TR), (BL,BR,TR)
+                    indices.push(cornerIdx[0], cornerIdx[2], cornerIdx[1]);
+                    indices.push(cornerIdx[2], cornerIdx[3], cornerIdx[1]);
+                    continue;
+                }
+
+                // near/far の2値分類（幾何平均しきい値）
+                const t = Math.sqrt(zMin * zMax);
+                // far プレートと near プレートを両方張る
+                for (let side = 0; side < 2; side++) {
+                    const wantFar = side === 0;
+                    for (let k = 0; k < 4; k++) {
+                        const isFar = cornerZ[k] > t;
+                        if (isFar === wantFar) {
+                            mapped[k] = cornerIdx[k];
+                            continue;
+                        }
+                        // 自分と反対側の角 → 同じプレート側の隣接角（無ければ対角）を
+                        // 参照に、その深度へ複製
+                        const adj = adjacentCorners[k];
+                        let refCorner = (cornerZ[adj[0]] > t) === wantFar ? adj[0]
+                            : (cornerZ[adj[1]] > t) === wantFar ? adj[1]
+                                : 3 - k;
+                        mapped[k] = addDuplicate(k, refCorner);
+                    }
+                    indices.push(mapped[0], mapped[2], mapped[1]);
+                    indices.push(mapped[2], mapped[3], mapped[1]);
+                }
+            }
+        }
+
+        if (extraPos.length) {
+            const newPositions = new Float32Array(positions.length + extraPos.length);
+            newPositions.set(positions, 0);
+            newPositions.set(extraPos, positions.length);
+            geometry.setAttribute('position', new THREE.BufferAttribute(newPositions, 3));
+            const newUVs = new Float32Array(uvs.length + extraUV.length);
+            newUVs.set(uvs, 0);
+            newUVs.set(extraUV, uvs.length);
+            geometry.setAttribute('uv', new THREE.BufferAttribute(newUVs, 2));
+        }
+        geometry.setIndex(indices);
     }
 
     // Do not connect masked pixels or surfaces separated by a large depth jump.

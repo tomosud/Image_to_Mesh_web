@@ -1,6 +1,6 @@
 # 実装状況
 
-最終更新: 2026-07-04
+最終更新: 2026-07-05
 
 ## 現在の構成
 
@@ -10,9 +10,10 @@
 
 1. `js/inference.js`: MoGe-2 ONNX 推論。ViT-S / ViT-B / ViT-L、`num_tokens`、WebGPU → WASM フォールバック、Cache API に対応。
 2. `js/moge_post.js`: point map から focal/shift を復元し、正規化 intrinsics、metric depth、camera-space point map、二値 mask を生成。
+2b. `js/edgesnap.js`: 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去、画素削除なし）。吸着元 index を UV 差し替えに渡す。Edge Threshold が検出しきい値、Snap Width が伝播上限。
 3. `js/worldpos.js`: camera-space `(X right, Y down, Z forward)` を Y-up の `(-X, -Y, Z)` へ変換し、表示スケールと mask を適用。
 4. `js/backfill.js`: エッジ切断で生じた穴を、奥側エッジのみから深度（disparity平面フィット+ラプラス平滑化）と色（プルプッシュ+拡散）で伸長し、第2レイヤー（world position + テクスチャ）を生成（PLAN_INPAINT.md）。
-5. `js/viewer.js`: three.js でテクスチャ付きメッシュまたは点群を表示。無効画素と大きな深度段差をまたぐ面を除去。第2レイヤーは `BackfillMesh` として表示・GLB 出力。
+5. `js/viewer.js`: three.js でテクスチャ付きメッシュまたは点群を表示。無効画素の面を除去し、深度段差セルは削除せず near/far 2枚のプレートへ分割（頂点複製で各1セル延長、正面ビュー隙間ゼロ）。第2レイヤーは `BackfillMesh` として表示・GLB 出力。
 6. `js/download.js` / `js/exr.js`: 元画像、Depth EXR、World Position EXR、Backfill WorldPos EXR / Texture PNG、OBJ、2048×2048 PNG を出力。
 
 ## 実装済み
@@ -25,8 +26,8 @@
 - [x] focal/shift、intrinsics、metric scale の後処理
 - [x] Y-up World Position の生成
 - [x] メッシュ、点群、ワイヤーフレーム、Unlit、No Color 表示
-- [x] mask と深度不連続による不要面の除去
-- [x] MoGe公式出力相当の深度エッジ頂点・面除去（Edge Threshold、範囲0.005〜1.000、既定0.220、1.000=完全Off）
+- [x] mask による不要面の除去
+- [x] 深度エッジのスナップ + シーム分割（旧: 頂点・面削除方式を 2026-07-05 に置き換え。Edge Threshold=検出しきい値 0.005〜1.000 既定0.220 / Snap Width=伝播上限 1〜32px 既定8。エッジのランプ画素を両側の台地へ吸着し UV も吸着元へ差し替え、段差セルは near/far 2枚のプレートに分割して各1セル延長 → 正面ビューの隙間ゼロ。PLAN_INPAINT.md 2026-07-05 ログ参照）— 実機検証待ち
 - [x] 推定 intrinsics を使った正面初期カメラと Reset View
 - [x] 3点指定による水平面・回転中心・手前側の設定
 - [x] 確定済み水平グリッドへの OBJ 座標変換（中心=原点、法線=+Y）

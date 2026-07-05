@@ -87,7 +87,8 @@
     function getOpts() {
         return {
             applyMask: $('applyMask').checked,
-            edgeThreshold: parseFloat($('edgeThreshold').value)
+            edgeThreshold: parseFloat($('edgeThreshold').value),
+            snapWidth: parseInt($('snapWidth').value, 10)
         };
     }
 
@@ -97,15 +98,34 @@
         // metric scale 適用は常時。mask 適用は表示側 opts。
         currentPost = MogePost.process(currentMoge, { useMetric: true });
         const opts = getOpts();
+        // エッジ画素の削除は EdgeSnap（スナップ+シーム分割）に置き換えたため、
+        // cleanDepthMask は無効深度と Apply Mask の処理のみに使う（rtol=1 で削除Off）。
         const cleanedMask = MogePost.cleanDepthMask(
             currentPost.depth,
             currentPost.mask,
             currentPost.width,
             currentPost.height,
-            opts.edgeThreshold,
+            1,
             opts.applyMask
         );
         currentPost.cleanedMask = cleanedMask;
+        // 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去）。
+        // 吸着元 index は viewer が UV 差し替えに使う。
+        let uvSrcIndex = null;
+        if (opts.edgeThreshold < 1) {
+            const snap = EdgeSnap.process({
+                depth: currentPost.depth,
+                points: currentPost.points,
+                validMask: cleanedMask,
+                width: currentPost.width,
+                height: currentPost.height
+            }, { rtol: opts.edgeThreshold, maxRampPx: opts.snapWidth });
+            if (snap) {
+                currentPost.depth = snap.depth;
+                currentPost.points = snap.points;
+                uvSrcIndex = snap.uvSrcIndex;
+            }
+        }
         currentWP = WorldPos.fromCameraPoints(
             currentPost.points,
             currentPost.width,
@@ -128,7 +148,7 @@
             colorTex,
             currentBaseName,
             currentPost.intrinsics,
-            { disableDepthEdgeCleanup: opts.edgeThreshold >= 1 },
+            { disableDepthEdgeCleanup: opts.edgeThreshold >= 1, uvSrcIndex },
             currentNormalMap
         );
         setDownloadEnabled(true);
@@ -307,6 +327,10 @@
             $('edgeThresholdValue').textContent = value >= 1 ? 'Off' : value.toFixed(3);
         });
         $('edgeThreshold').addEventListener('change', recompute);
+        $('snapWidth').addEventListener('input', (e) => {
+            $('snapWidthValue').textContent = e.target.value;
+        });
+        $('snapWidth').addEventListener('change', recompute);
         $('applyMask').addEventListener('change', recompute);
         $('fillOcclusion').addEventListener('change', updateBackfill);
         $('fillMargin').addEventListener('input', (e) => {
