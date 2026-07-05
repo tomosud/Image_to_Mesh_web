@@ -1276,8 +1276,11 @@ const Viewer = (function () {
         const exportTexture = createGLBTexture(currentColorTexture, true);
         const exportNormalTexture = createGLBTexture(currentNormalTexture, false);
         const exportMaterial = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            map: exportTexture,
+            color: 0x000000,
+            emissive: 0xffffff,
+            emissiveMap: exportTexture,
+            metalness: 1.0,
+            roughness: 1.0,
             normalMap: exportNormalTexture,
             side: THREE.DoubleSide
         });
@@ -1292,8 +1295,11 @@ const Viewer = (function () {
             if (backfillGeometry && backfillGeometry.index && backfillGeometry.index.count > 0) {
                 backfillGlbTexture = createGLBTexture(currentBackfillLayer.colorTex, true);
                 backfillMaterial = new THREE.MeshStandardMaterial({
-                    color: 0xffffff,
-                    map: backfillGlbTexture,
+                    color: 0x000000,
+                    emissive: 0xffffff,
+                    emissiveMap: backfillGlbTexture,
+                    metalness: 1.0,
+                    roughness: 1.0,
                     side: THREE.DoubleSide
                 });
                 const backfillExportMesh = new THREE.Mesh(backfillGeometry, backfillMaterial);

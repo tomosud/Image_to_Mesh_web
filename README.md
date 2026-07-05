@@ -176,6 +176,7 @@ Scene GLB contains:
 - `EstimatedSourceCamera`
 - `CurrentViewCamera`
 - Source-image texture and tangent-space normal map
+- GLB materials use the source/backfill color textures as emissive maps, with black base color and metallic set to `1.0`
 
 OBJ ZIP uses the same source-image texture and tangent-space normal map as the GLB. When Backfill exists, the OBJ also contains a `BackfillMesh` object and the ZIP includes its Backfill texture PNG.
 

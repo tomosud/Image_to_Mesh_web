@@ -27,6 +27,7 @@
 - depth 段差セルの near/far 2枚プレート分割と各1セル延長
 - 奥側エッジ由来の Backfill 第2レイヤー
 - Depth EXR、Initial Depth EXR、World Position EXR、Backfill EXR/PNG、OBJ+Texture ZIP、Scene GLB、2048 PNG 出力
+- Scene GLB の色テクスチャは emissive map に接続し、base color は黒、metallic は 1.0
 - 連続処理時に ONNX Runtime session へ並列 `run()` が入らないための排他ガード
 
 ## 現在の既定値
