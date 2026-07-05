@@ -135,11 +135,15 @@ body.ui-hidden #toggleUI:hover {
 }
 
 #sidePanel {
+    /* 右下だと縦に長くなったとき下端が画面外に出て触れないため左側へ移動。
+       meshInfo(左上)の下に置き、収まらない分はパネル内スクロール。 */
     position: absolute;
-    bottom: 20px;
-    right: 20px;
+    top: 150px;
+    left: 20px;
     z-index: 1000;
     display: none;
+    max-height: calc(100vh - 240px);
+    overflow-y: auto;
 }
 
 #sidePanel .control-panel {

@@ -6,7 +6,7 @@
 
 単一画像をブラウザ内で MoGe-2 に入力し、深度・ワールドポジション・メッシュを生成する。画像と推論結果は外部へ送信しない。モデルと JavaScript ライブラリの初回取得時のみネットワークを使用する。
 
-処理パイプライン:
+処理パイプライン（各段階が何を変更するかの詳細解説は [PIPELINE.md](PIPELINE.md)）:
 
 1. `js/inference.js`: MoGe-2 ONNX 推論。ViT-S / ViT-B / ViT-L、`num_tokens`、WebGPU → WASM フォールバック、Cache API に対応。
 2. `js/moge_post.js`: point map から focal/shift を復元し、正規化 intrinsics、metric depth、camera-space point map、二値 mask を生成。
