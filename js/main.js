@@ -548,7 +548,8 @@
         $('numTokens').addEventListener('input', (e) => { $('numTokensValue').textContent = e.target.value; });
         $('edgeThreshold').addEventListener('input', (e) => {
             const value = parseFloat(e.target.value);
-            $('edgeThresholdValue').textContent = value >= 1 ? 'Off' : value.toFixed(3);
+            const fixed4 = value.toFixed(4);
+            $('edgeThresholdValue').textContent = value >= 1 ? 'Off' : (fixed4.endsWith('0') ? value.toFixed(3) : fixed4);
         });
         $('edgeThreshold').addEventListener('change', requestRecompute);
         $('snapWidth').addEventListener('input', (e) => {

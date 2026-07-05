@@ -145,7 +145,7 @@
                 <div class="control-group">
                     <label>Edge Threshold: <span id="edgeThresholdValue">0.010</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Relative depth jump threshold for EdgeSnap detection." aria-label="Edge Threshold help">?</span></label>
                     <div class="slider-container">
-                        <input type="range" id="edgeThreshold" min="0.005" max="1.000" step="0.005" value="0.010">
+                        <input type="range" id="edgeThreshold" min="0.0001" max="1.000" step="0.0001" value="0.010">
                     </div>
                     <div class="control-help">Compares horizontal/vertical neighbor pairs. If their relative depth jump is above this value, both pixels are marked for snapping. Smaller values mark more edges. Set 1.000 to disable EdgeSnap and mesh seam splitting.</div>
                 </div>
@@ -284,6 +284,6 @@
     <script src="js/viewer.js?v=20260705-23"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260705-1"></script>
-    <script src="js/main.js?v=20260705-16"></script>
+    <script src="js/main.js?v=20260705-17"></script>
 </body>
 </html>
