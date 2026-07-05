@@ -37,7 +37,7 @@ const Backfill = (function () {
     // メイン処理
     // input: { depth: Float32[H*W](metric), validMask: Uint8(切断後有効), holeMask: Uint8(エッジ切断で消えた画素),
     //          intrinsics: {fx,fy,cx,cy}(正規化), color: ImageData(元解像度), width, height }
-    // opts: { marginPx, jumpTol, frontDispLimit, maxDepthFactor, farPriorityPx }
+    // opts: { marginPx, jumpTol, frontDispLimit, maxDepthFactor, holePreclaimPx, farPriorityPx }
     // 戻り値: { worldPos: Float32[H*W*4], colorTex, validMask: Uint8, width, height, stats } | null
     function generate(input, opts) {
         const { depth, validMask, holeMask, intrinsics, width: W, height: H } = input;
@@ -51,6 +51,7 @@ const Backfill = (function () {
         const PUSH_BASE = 0.015;  // 層全体の基礎押し込み（z-fighting とクラック回避）
         const PUSH_BACK = 0.04;   // 種から離れるほど追加で奥へ押し込む最大比率
         const RAMP_PX = 12;       // PUSH_BACK がフルに効くまでの距離
+        const holePreclaimPx = Math.max(0, Math.floor((opts && opts.holePreclaimPx) ?? 3));
         const farPriorityPx = Math.max(0, Math.floor((opts && opts.farPriorityPx) ?? 12));
         const N = W * H;
 
@@ -243,7 +244,8 @@ const Backfill = (function () {
         const dist = new Int32Array(N).fill(-1);
         const bgDisp = new Float32Array(N);
         const colorF = new Float32Array(N * 3);
-        let head = 0, tail = 0, filledPx = 0;
+        let filledPx = 0;
+        const seedList = [];
         for (let i = 0; i < N; i++) {
             if (!seed[i]) continue;
             dist[i] = 0;
@@ -251,8 +253,67 @@ const Backfill = (function () {
             colorF[i * 3] = seedColRobust[i * 3];
             colorF[i * 3 + 1] = seedColRobust[i * 3 + 1];
             colorF[i * 3 + 2] = seedColRobust[i * 3 + 2];
-            queue[tail++] = i;
+            seedList.push(i);
         }
+
+        // ---- 2a. 黒穴内だけの奥側 preclaim ----
+        // seed 全体から holeMask へ数pxだけ先に自己深度を広げる。同じ黒穴画素に複数 seed が
+        // 届いた場合は、より奥（小さい disparity）の値だけが勝つ。ここでは foreground 裏へは
+        // 入らないので、黒い削れ幅ぶんの初期割り当てだけを奥側優先にできる。
+        let holePreclaimFilled = 0, holePreclaimOverrides = 0;
+        const preclaimOrder = [];
+        {
+            const passes = Math.min(holePreclaimPx, marginPx);
+            let frontier = seedList.slice();
+            const candSrc = new Int32Array(N).fill(-1);
+            const candDisp = new Float32Array(N);
+            for (let p = 0; p < passes && frontier.length; p++) {
+                const candList = [];
+                for (const i of frontier) {
+                    const x = i % W, y = (i / W) | 0;
+                    for (const [dx, dy] of OFFS) {
+                        const nx = x + dx, ny = y + dy;
+                        if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                        const j = ny * W + nx;
+                        if (!holeMask[j]) continue;
+                        const candidate = bgDisp[i];
+                        if (dist[j] >= 0 && !(candidate < bgDisp[j] / (1 + jumpTol))) continue;
+                        if (candSrc[j] < 0) {
+                            candSrc[j] = i;
+                            candDisp[j] = candidate;
+                            candList.push(j);
+                        } else if (candidate < candDisp[j] / (1 + jumpTol)) {
+                            candSrc[j] = i;
+                            candDisp[j] = candidate;
+                        }
+                    }
+                }
+                const nextFrontier = [];
+                for (const j of candList) {
+                    const src = candSrc[j];
+                    candSrc[j] = -1;
+                    if (src < 0) continue;
+                    const candidate = candDisp[j];
+                    if (dist[j] >= 0 && !(candidate < bgDisp[j] / (1 + jumpTol))) continue;
+                    if (dist[j] < 0) { filledPx++; holePreclaimFilled++; }
+                    else holePreclaimOverrides++;
+                    dist[j] = Math.min(p + 1, marginPx);
+                    bgDisp[j] = bgDisp[src];
+                    label[j] = label[src];
+                    colorF[j * 3] = colorF[src * 3];
+                    colorF[j * 3 + 1] = colorF[src * 3 + 1];
+                    colorF[j * 3 + 2] = colorF[src * 3 + 2];
+                    synth[j] = 1;
+                    nextFrontier.push(j);
+                    preclaimOrder.push(j);
+                }
+                frontier = nextFrontier;
+            }
+        }
+
+        let head = 0, tail = 0;
+        for (const i of seedList) queue[tail++] = i;
+        for (const i of preclaimOrder) queue[tail++] = i;
         while (head < tail) {
             const i = queue[head++];
             if (dist[i] >= marginPx) continue;
@@ -472,6 +533,9 @@ const Backfill = (function () {
             jumpTol,
             frontDispLimit,
             maxDepthFactor,
+            holePreclaimPx,
+            holePreclaimFilled,
+            holePreclaimOverrides,
             farPriorityPx,
             farPriorityOverrides,
             size: `${W}x${H}`

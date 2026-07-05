@@ -202,6 +202,12 @@
                         </div>
                     </div>
                     <div class="control-group">
+                        <label>Backfill Hole Preclaim (px): <span id="backfillHolePreclaimValue">3</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Before normal fill BFS, all backfill edge seeds claim only black hole pixels by this many pixels. When claims collide, the deeper label wins. Set 0 to disable." aria-label="Backfill Hole Preclaim help">?</span></label>
+                        <div class="slider-container">
+                            <input type="range" id="backfillHolePreclaim" min="0" max="16" step="1" value="3">
+                        </div>
+                    </div>
+                    <div class="control-group">
                         <label>Backfill Far Priority (px): <span id="backfillFarPriorityValue">12</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="How far a deeper backfill label can locally override a nearer label after nearest-edge BFS. Higher values suppress foreground-depth streaks more, but can pull wider regions toward farther surfaces. Set 0 to disable." aria-label="Backfill Far Priority help">?</span></label>
                         <div class="slider-container">
                             <input type="range" id="backfillFarPriority" min="0" max="48" step="1" value="12">
@@ -270,10 +276,10 @@
     <script src="js/colorpatch.js?v=20260705-2"></script>
     <script src="js/worldpos.js?v=20260620-13"></script>
     <script src="js/normalmap.js?v=20260620-13"></script>
-    <script src="js/backfill.js?v=20260705-8"></script>
+    <script src="js/backfill.js?v=20260705-9"></script>
     <script src="js/viewer.js?v=20260705-18"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260705-1"></script>
-    <script src="js/main.js?v=20260705-14"></script>
+    <script src="js/main.js?v=20260705-15"></script>
 </body>
 </html>

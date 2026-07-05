@@ -44,8 +44,34 @@
 - Backfill Parallax Cut: `0.50x` scene median disparity
 - Backfill Front Clamp: `1.00x` assigned edge disparity
 - Backfill Far Clamp: `4.0x` assigned edge depth
+- Backfill Hole Preclaim: `3px`
 - Backfill Far Priority: `12px`
 - SkyMaskColorFill inner ring: `4px`
+
+## 途中状態: Backfill 伸長の調整中
+
+2026-07-05 時点で、覗き込み時に backfill が手前側 depth から細く伸びる問題を調整中。
+
+現在入っているテスト処理:
+
+- `Backfill Parallax Cut`: backfill メッシュ面を disparity 差で切る倍率。`Other` に移動済み
+- `Backfill Front Clamp` / `Backfill Far Clamp`: 生成 depth の手前/奥クランプ。`Other` に移動済み
+- `Backfill Far Priority`: 通常 BFS 後、近傍内のより奥ラベルが手前寄りラベルを上書きできる局所補正
+- `Backfill Hole Preclaim`: 通常 BFS 前に、全 seed から `holeMask` 内だけへ数px先取り拡張し、競合時はより奥のラベルを優先する処理
+- `viewer.js` では `Small Component Faces` の前に境界 face を1層削るテスト処理 `erodeBoundaryFaces(geometry, 1)` を主メッシュ/backfill メッシュの両方へ入れている
+
+現時点の重要な注意:
+
+- `Hole Preclaim` は `holeMask` 内だけに効く。見えている黒穴が `holeMask` ではなく、メッシュ面カットや backfill 視差カット後の描画上の穴なら効果が分かりにくい
+- 通常 BFS 後の `2c` close 処理は、残った `holeMask` 画素へ「最も手前 = 最大 disparity」のリム値を伝播する。ここは奥優先ではないため、残り穴の見え方に影響している可能性がある
+- `Backfill Far Priority` は hole 以外の `synth` にも効くため、値を上げると手前伸びは減り得るが、広い領域が奥へ寄りすぎる可能性がある
+- `Hole Preclaim` と `Far Priority` はどちらも `0` で無効化できる
+
+次に見るべき点:
+
+- コンソールの `[Backfill]` ログで `holePreclaimFilled` / `holePreclaimOverrides` / `farPriorityOverrides` が増えているか確認する
+- もし `holePreclaimFilled` が少ない場合、問題箇所は `holeMask` ではなく描画上の穴の可能性が高い
+- その場合は `2c` close の優先規則、または backfill メッシュ面カット後の穴への対策を検討する
 
 ## 要実機確認
 

@@ -135,6 +135,9 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 - **各奥側エッジをそれぞれ独立に延長する（最奥1枚へ吸着しない）。**
   - 種を背景面ごとにラベル分けする（4近傍で disparity 比が近い種＝同一背景面。前景を
     挟んで分かれた背景は別ラベル）
+  - 通常 BFS 前に、全 seed から黒穴（`holeMask`）内だけへ `Backfill Hole Preclaim`（既定 `3px`）
+    ぶん自己深度・ラベル・色を先取り拡張する。同じ黒穴画素で競合した場合は、より奥のラベル
+    （小さい disparity）が勝つ。foreground 裏へは入らない
   - 多源 BFS で各穴/前景画素を「最も近い奥側エッジ」に割り当て、その背景面の disparity・
     ラベル・色を伝播する。深度の平滑化・色の平滑化はいずれも**同一ラベル内のみ**で行い、
     別背景面（例: 空 vs 建物）が深度で膜になったり色が混ざったりしないようにする
@@ -198,7 +201,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 | Sky / Masked Area | 3, 4, 5 |
 | Fill Occlusion / Fill Margin | 10 |
 | Backfill Parallax Cut | 10（backfill メッシュの視差カットのみ。backfill 生成は再計算しない） |
-| Backfill Front Clamp / Far Clamp / Far Priority | 10（backfill 生成深度・割り当ての調整。backfill のみ再生成） |
+| Backfill Front Clamp / Far Clamp / Hole Preclaim / Far Priority | 10（backfill 生成深度・割り当ての調整。backfill のみ再生成） |
 
 固定しきい値 / UI既定値:
 
@@ -207,6 +210,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 - Backfill Parallax Cut: scene median disparity multiplier, default `0.50`
 - Backfill Front Clamp: max generated disparity multiplier, default `1.00`
 - Backfill Far Clamp: max generated depth multiplier, default `4.0`
+- Backfill Hole Preclaim: black-hole-only far-wins preclaim distance, default `3px`, `0` disables it
 - Backfill Far Priority: local far-label override distance, default `12px`, `0` disables it
 - backfill 種検出: relative depth jump `0.10`
 - ColorPatch 帯・側判定: relative depth jump `0.10`

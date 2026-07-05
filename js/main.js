@@ -311,6 +311,11 @@
         return Number.isFinite(value) ? value : 4.0;
     }
 
+    function getBackfillHolePreclaimPx() {
+        const value = parseInt($('backfillHolePreclaim').value, 10);
+        return Number.isFinite(value) ? Math.max(0, value) : 3;
+    }
+
     function getBackfillFarPriorityPx() {
         const value = parseInt($('backfillFarPriority').value, 10);
         return Number.isFinite(value) ? Math.max(0, value) : 12;
@@ -345,6 +350,10 @@
         $('backfillFarClampValue').textContent = `${getBackfillFarClamp().toFixed(1)}x`;
     }
 
+    function updateBackfillHolePreclaimLabel() {
+        $('backfillHolePreclaimValue').textContent = String(getBackfillHolePreclaimPx());
+    }
+
     function updateBackfillFarPriorityLabel() {
         $('backfillFarPriorityValue').textContent = String(getBackfillFarPriorityPx());
     }
@@ -377,6 +386,7 @@
                 marginPx: getBackfillMarginPx(),
                 frontDispLimit: getBackfillFrontClamp(),
                 maxDepthFactor: getBackfillFarClamp(),
+                holePreclaimPx: getBackfillHolePreclaimPx(),
                 farPriorityPx: getBackfillFarPriorityPx()
             });
         }
@@ -563,6 +573,10 @@
             updateBackfillClampLabels();
         });
         $('backfillFarClamp').addEventListener('change', updateBackfill);
+        $('backfillHolePreclaim').addEventListener('input', (e) => {
+            updateBackfillHolePreclaimLabel();
+        });
+        $('backfillHolePreclaim').addEventListener('change', updateBackfill);
         $('backfillFarPriority').addEventListener('input', (e) => {
             updateBackfillFarPriorityLabel();
         });
@@ -622,6 +636,7 @@
         updateFillMarginLabel();
         updateBackfillParallaxCutLabel();
         updateBackfillClampLabels();
+        updateBackfillHolePreclaimLabel();
         updateBackfillFarPriorityLabel();
         Viewer.setBackfillParallaxCutK(getBackfillParallaxCutK());
         [
