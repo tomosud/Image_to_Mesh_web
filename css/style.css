@@ -208,7 +208,8 @@ input[type="range"] {
 }
 
 button,
-select {
+select,
+input[type="number"] {
     background: rgba(0, 0, 0, 0.56);
     color: var(--text);
     border: 1px solid var(--border);
@@ -216,7 +217,8 @@ select {
     font-size: 14px;
 }
 
-select {
+select,
+input[type="number"] {
     width: 100%;
     padding: 7px 9px;
 }
@@ -256,6 +258,11 @@ button:disabled {
     color: #b9c4ff;
     font-size: 12px;
     line-height: 1.4;
+}
+
+.control-status.warning {
+    color: #ffd08a;
+    font-weight: 700;
 }
 
 #adjustHorizontalGrid.active {

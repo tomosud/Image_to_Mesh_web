@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image to Mesh — World Position Viewer</title>
     <link rel="icon" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3e%3cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3e%3c/svg%3e">
-    <link rel="stylesheet" href="css/style.css?v=20260705-3">
+    <link rel="stylesheet" href="css/style.css?v=20260705-5">
 </head>
 <body>
     <div id="container">
@@ -90,6 +90,55 @@
                     <button id="recompute" disabled>Recompute</button>
                 </div>
                 <div class="control-group">
+                    <div class="checkbox-with-help">
+                        <label class="chk">
+                            <input type="checkbox" id="depthUpsampleEnable" checked>
+                            High-Res Depth
+                        </label>
+                        <span class="help-tip" tabindex="0" role="note" data-tooltip="Upsamples metric depth to the input image aspect ratio, capped at 2048 px on the long edge. WebGPU applies an RGB-guided joint bilateral filter; unavailable WebGPU falls back to the initial resize." aria-label="High-Res Depth help">?</span>
+                    </div>
+                    <div id="depthUpsampleStatus" class="control-status">Depth upsampling: pending</div>
+                </div>
+                <div class="control-group">
+                    <label>Initial Depth Resize</label>
+                    <select id="depthInitialMode">
+                        <option value="bilinear" selected>Bilinear</option>
+                        <option value="nearest">Nearest</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>JBU Radius (px): <span id="depthUpsampleRadiusValue">3</span></label>
+                    <div class="slider-container">
+                        <input type="range" id="depthUpsampleRadius" min="1" max="8" step="1" value="3">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Sigma Space: <span id="depthSigmaSpaceValue">2.0</span></label>
+                    <div class="slider-container">
+                        <input type="range" id="depthSigmaSpace" min="0.5" max="8.0" step="0.5" value="2.0">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Sigma Color: <span id="depthSigmaColorValue">0.080</span></label>
+                    <div class="slider-container">
+                        <input type="range" id="depthSigmaColor" min="0.005" max="0.300" step="0.005" value="0.080">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Sigma Depth (m): <span id="depthSigmaDepthValue">0.15</span></label>
+                    <div class="slider-container">
+                        <input type="range" id="depthSigmaDepth" min="0.01" max="1.00" step="0.01" value="0.15">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="chk">
+                        <input type="checkbox" id="depthTreatZeroInvalid" checked>
+                        Treat 0 depth as invalid
+                    </label>
+                    <label>Invalid Depth Value</label>
+                    <input type="number" id="depthInvalidValue" value="-1" step="0.1">
+                </div>
+                <div class="control-group">
                     <label>Edge Threshold: <span id="edgeThresholdValue">0.045</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Detects sudden depth changes. Ramp pixels around each edge are snapped to the near/far surface (no geometry is deleted) and the mesh is split there. Lower values detect more edges. Off disables edge snapping and splitting." aria-label="Edge Threshold help">?</span></label>
                     <div class="slider-container">
                         <input type="range" id="edgeThreshold" min="0.005" max="1.000" step="0.005" value="0.045">
@@ -129,6 +178,7 @@
                     <div class="dl-title">Downloads</div>
                     <button id="dlImage" disabled>Original</button>
                     <button id="dlDepth" disabled>Depth (EXR)</button>
+                    <button id="dlDepthInitial" disabled>Initial Depth (EXR)</button>
                     <button id="dlNormal" disabled>Normal Map (PNG)</button>
                     <button id="dlWorldPos" disabled>Aligned WorldPos (EXR)</button>
                     <button id="dlBackfillWP" disabled>Backfill WorldPos (EXR)</button>
@@ -180,6 +230,7 @@
     <!-- App modules -->
     <script src="js/exr.js?v=20260620-13"></script>
     <script src="js/moge_post.js?v=20260705-2"></script>
+    <script src="js/depth_upsample.js?v=20260705-1"></script>
     <script src="js/edgesnap.js?v=20260705-1"></script>
     <script src="js/colorpatch.js?v=20260705-1"></script>
     <script src="js/worldpos.js?v=20260620-13"></script>
@@ -187,7 +238,7 @@
     <script src="js/backfill.js?v=20260704-5"></script>
     <script src="js/viewer.js?v=20260705-3"></script>
     <script src="js/inference.js?v=20260620-13"></script>
-    <script src="js/download.js?v=20260704-1"></script>
-    <script src="js/main.js?v=20260705-3"></script>
+    <script src="js/download.js?v=20260705-1"></script>
+    <script src="js/main.js?v=20260705-6"></script>
 </body>
 </html>

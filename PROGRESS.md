@@ -61,3 +61,15 @@ MoGe 後処理が返す正規化 `fx/fy` から水平・垂直画角を計算す
 - 現行の利用方法と仕様: [README.md](README.md)
 - MoGe-2 移行時の設計記録: [PLAN_MOGE.md](PLAN_MOGE.md)
 - 初期 DA3 版の設計記録: [PLAN.md](PLAN.md)
+
+## 2026-07-05 depth 高解像度化
+
+- `js/depth_upsample.js` を追加し、MoGe 後処理直後の metric depth を入力画像比率・長辺最大 2048px へ拡大する処理を実装。
+- WebGPU が使える場合は RGB-guided Joint Bilateral Filter を WGSL compute shader で実行。depth は計算中 float32 メートル単位のまま保持。
+- WebGPU が使えない場合は初期拡大（nearest / bilinear）を返す fallback とし、既存 Tool の WASM/非 WebGPU 動作を維持。
+- 高解像度 depth から camera-space points を再投影し、既存の mask cleanup / Sky Backdrop / EdgeSnap / WorldPos / NormalMap / Backfill / Viewer / EXR export に流す形で統合。
+- UI に High-Res Depth、初期拡大方式、radius、sigmaSpace、sigmaColor、sigmaDepthMeters、invalid depth 設定を追加。
+- デバッグ用に `Initial Depth (EXR)` ダウンロードを追加。最終 `Depth (EXR)` はフィルタ後の高解像度 depth。
+- 構文確認: `node --check js/depth_upsample.js`、`node --check js/main.js`、`node --check js/download.js` は PASS。
+- ブラウザ実機確認は `CLAUDE.md` ルールどおりユーザー側で実施予定。
+- 連続ドロップ/選択/再計算で ONNX Runtime の同一 session に並列 `run()` が入らないよう、`processImage` と `recompute` に排他ガードを追加。処理中の追加要求は警告して無視する。

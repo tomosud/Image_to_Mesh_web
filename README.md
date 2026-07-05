@@ -15,6 +15,7 @@ https://github.com/user-attachments/assets/9ee06a21-c0db-4ef7-a144-4e5478724f1f
 - Single-image depth and 3D geometry estimation with MoGe-2
 - ViT-S, ViT-B, and ViT-L model choices
 - WebGPU inference with automatic WASM fallback
+- RGB-guided high-resolution depth upsampling, capped at 2048 px on the long edge
 - Textured mesh, point-cloud, wireframe, and unlit display modes
 - Estimated source-camera view
 - Three-point horizontal-plane and orbit-center adjustment
@@ -84,6 +85,18 @@ Controls the internal inference resolution.
 - Higher values can preserve more detail but need more time and memory
 - Changing this setting requires **Recompute** and runs inference again
 
+### High-Res Depth
+
+Upsamples the metric depth after MoGe-2 inference and before geometry, edge snapping, world-position generation, backfill, and exports.
+
+- Target resolution follows the input image aspect ratio
+- Long edge is capped at `2048` px
+- WebGPU applies an RGB-guided joint bilateral filter
+- If WebGPU is unavailable, the status line clearly reports the fallback and the tool uses the selected initial resize mode
+- Depth stays as float32 meters during processing
+
+Use the radius and sigma controls to balance RGB edge alignment against texture-copy artifacts.
+
 ### Edge Threshold
 
 Controls detection of sharp depth discontinuities. Instead of deleting geometry, the soft ramp pixels around each detected edge are snapped to the surfaces on both sides (removing in-between depth values and colors), and the mesh is split at the edge. Both sides extend one cell across the seam, so no hole opens in the front view.
@@ -134,6 +147,7 @@ Invalid or non-positive depth values still cannot form geometry in the OFF mode.
 |---|---|
 | Original | Original JPG or PNG file |
 | Depth (EXR) | 32-bit FLOAT camera depth in the `Y` channel |
+| Initial Depth (EXR) | Debug 32-bit FLOAT depth after initial high-resolution resize and before RGB-guided filtering |
 | Normal Map (PNG) | RGB tangent-space normal map generated from MoGe-2 normals |
 | Aligned WorldPos (EXR) | 32-bit FLOAT positions with `R=X`, `G=Y`, and `B=Z` |
 | OBJ | Triangle mesh with UV coordinates |

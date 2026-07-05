@@ -22,6 +22,11 @@ const Downloader = (function () {
         saveBlob(blob, `${baseName}_depth.exr`);
     }
 
+    function saveDepthEXRAs(depth, width, height, filename) {
+        const blob = EXR.encodeDepth(depth, width, height);
+        saveBlob(blob, filename);
+    }
+
     // world position EXR (RGBA Float32, XYZ+1)
     function saveWorldPosEXR(rgba, width, height, baseName, aligned) {
         const blob = EXR.encodeWorldPos(rgba, width, height);
@@ -60,5 +65,5 @@ const Downloader = (function () {
         }, 'image/png');
     }
 
-    return { saveBlob, saveOriginal, saveDepthEXR, saveWorldPosEXR, saveNormalPNG, saveTexturePNG };
+    return { saveBlob, saveOriginal, saveDepthEXR, saveDepthEXRAs, saveWorldPosEXR, saveNormalPNG, saveTexturePNG };
 })();

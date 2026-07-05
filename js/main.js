@@ -11,7 +11,10 @@
     let currentNormalMap = null;   // tangent-space RGBA8 normal map
     let currentBackfill = null;    // 遮蔽穴インペイントの第2レイヤー（Backfill.generate）
     let currentPatchedImage = null; // エッジ混色帯をパッチした表示/backfill用画像（ColorPatch）
+    let currentDepthUpsampleDebug = null;
     let modelReady = false;
+    let processingImage = false;
+    let recomputingPost = false;
     let lastNumTokens = 1800;
     let currentModelKey = 'vitb';
     const MODEL_STORAGE_KEY = 'image-to-mesh:model';
@@ -44,13 +47,23 @@
     }
 
     function setDownloadEnabled(on) {
-        ['dlImage', 'dlDepth', 'dlNormal', 'dlWorldPos', 'exportOBJ', 'exportGLB', 'exportPNG', 'recompute'].forEach(id => {
+        ['dlImage', 'dlDepth', 'dlDepthInitial', 'dlNormal', 'dlWorldPos', 'exportOBJ', 'exportGLB', 'exportPNG', 'recompute'].forEach(id => {
             $(id).disabled = !on;
         });
         if (!on) {
             $('dlBackfillWP').disabled = true;
             $('dlBackfillTex').disabled = true;
+            $('dlDepthInitial').disabled = true;
         }
+    }
+
+    function isBusy() {
+        return processingImage || recomputingPost;
+    }
+
+    function reportBusy() {
+        console.warn('Processing is already running. Ignoring the new request.');
+        alert('Processing is already running. Please wait for the current image to finish.');
     }
 
     // ---- 画像読み込み ----
@@ -96,99 +109,168 @@
         };
     }
 
+    function getDepthUpsampleOpts() {
+        return {
+            enabled: $('depthUpsampleEnable').checked,
+            initialMode: $('depthInitialMode').value,
+            radius: parseInt($('depthUpsampleRadius').value, 10),
+            sigmaSpace: parseFloat($('depthSigmaSpace').value),
+            sigmaColor: parseFloat($('depthSigmaColor').value),
+            sigmaDepthMeters: parseFloat($('depthSigmaDepth').value),
+            treatZeroAsInvalid: $('depthTreatZeroInvalid').checked,
+            invalidDepthValue: parseFloat($('depthInvalidValue').value),
+            maxLongEdge: 2048
+        };
+    }
+
+    function updateDepthUpsampleStatus(info) {
+        const status = $('depthUpsampleStatus');
+        if (!status) return;
+        status.classList.remove('warning');
+        status.removeAttribute('title');
+        if (!info || !info.enabled) {
+            status.textContent = 'Depth upsampling: off';
+            return;
+        }
+        const sizeText = `${info.sourceWidth}x${info.sourceHeight} -> ${info.width}x${info.height}`;
+        if (info.provider === 'webgpu') {
+            status.textContent = `Depth: ${sizeText} (WebGPU)`;
+            return;
+        }
+        status.classList.add('warning');
+        status.textContent = `Depth: ${sizeText} (WebGPU unavailable - using initial resize fallback)`;
+        if (info.warning) status.title = info.warning;
+    }
+
+    function updateDepthUpsampleLabels() {
+        $('depthUpsampleRadiusValue').textContent = $('depthUpsampleRadius').value;
+        $('depthSigmaSpaceValue').textContent = Number($('depthSigmaSpace').value).toFixed(1);
+        $('depthSigmaColorValue').textContent = Number($('depthSigmaColor').value).toFixed(3);
+        $('depthSigmaDepthValue').textContent = Number($('depthSigmaDepth').value).toFixed(2);
+    }
+
     // 後処理 → WP → ビューア反映（推論はやり直さない、軽量）
-    function recompute() {
+    async function recompute(showProgress, fromProcessImage) {
         if (!currentMoge) return;
-        // metric scale 適用は常時。mask 適用は表示側 opts。
-        currentPost = MogePost.process(currentMoge, { useMetric: true });
-        const opts = getOpts();
-        // エッジ画素の削除は EdgeSnap（スナップ+シーム分割）に置き換えたため、
-        // cleanDepthMask は無効深度と mask の処理のみに使う（rtol=1 で削除Off）。
-        // maskMode 'sky'/'remove' は mask を適用して実ジオメトリを確定し、
-        // 'sky' はその後、除去された画素を最奥の書き割りで埋め戻す。
-        let cleanedMask = MogePost.cleanDepthMask(
-            currentPost.depth,
-            currentPost.mask,
-            currentPost.width,
-            currentPost.height,
-            1,
-            opts.maskMode !== 'off'
-        );
-        if (opts.maskMode === 'sky') {
-            const backdrop = MogePost.fillBackdrop(
+        if (recomputingPost || (processingImage && !fromProcessImage)) {
+            reportBusy();
+            return;
+        }
+        recomputingPost = true;
+        try {
+            if (showProgress) showLoading(true, 'Recomputing high-resolution depth...');
+            // metric scale 適用は常時。mask 適用は表示側 opts。
+            const basePost = MogePost.process(currentMoge, { useMetric: true });
+            currentPost = await DepthUpsampler.process(basePost, currentImageData, getDepthUpsampleOpts());
+            currentDepthUpsampleDebug = currentPost.debug || null;
+            updateDepthUpsampleStatus(currentPost.upsampleInfo);
+            const opts = getOpts();
+            // エッジ画素の削除は EdgeSnap（スナップ+シーム分割）に置き換えたため、
+            // cleanDepthMask は無効深度と mask の処理のみに使う（rtol=1 で削除Off）。
+            // maskMode 'sky'/'remove' は mask を適用して実ジオメトリを確定し、
+            // 'sky' はその後、除去された画素を最奥の書き割りで埋め戻す。
+            let cleanedMask = MogePost.cleanDepthMask(
                 currentPost.depth,
-                currentPost.points,
-                cleanedMask,
-                currentPost.intrinsics,
+                currentPost.mask,
                 currentPost.width,
-                currentPost.height
+                currentPost.height,
+                1,
+                opts.maskMode !== 'off'
             );
-            if (backdrop) {
-                currentPost.depth = backdrop.depth;
-                currentPost.points = backdrop.points;
-                cleanedMask = backdrop.validMask;
+            if (opts.maskMode === 'sky') {
+                const backdrop = MogePost.fillBackdrop(
+                    currentPost.depth,
+                    currentPost.points,
+                    cleanedMask,
+                    currentPost.intrinsics,
+                    currentPost.width,
+                    currentPost.height
+                );
+                if (backdrop) {
+                    currentPost.depth = backdrop.depth;
+                    currentPost.points = backdrop.points;
+                    cleanedMask = backdrop.validMask;
+                }
             }
-        }
-        currentPost.cleanedMask = cleanedMask;
-        // 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去）。
-        // uvSrcIndex（吸着元 index）は現在未使用（UV差し替えは廃止、
-        // PLAN_EDGE_COLOR.md。将来の色パッチ用に配線は残す）。
-        let uvSrcIndex = null;
-        if (opts.edgeThreshold < 1) {
-            const snap = EdgeSnap.process({
-                depth: currentPost.depth,
-                points: currentPost.points,
-                validMask: cleanedMask,
-                width: currentPost.width,
-                height: currentPost.height
-            }, { rtol: opts.edgeThreshold, maxRampPx: opts.snapWidth });
-            if (snap) {
-                currentPost.depth = snap.depth;
-                currentPost.points = snap.points;
-                uvSrcIndex = snap.uvSrcIndex;
+            currentPost.cleanedMask = cleanedMask;
+            // 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去）。
+            // uvSrcIndex（吸着元 index）は現在未使用（UV差し替えは廃止、
+            // PLAN_EDGE_COLOR.md。将来の色パッチ用に配線は残す）。
+            let uvSrcIndex = null;
+            if (opts.edgeThreshold < 1) {
+                const snap = EdgeSnap.process({
+                    depth: currentPost.depth,
+                    points: currentPost.points,
+                    validMask: cleanedMask,
+                    width: currentPost.width,
+                    height: currentPost.height
+                }, { rtol: opts.edgeThreshold, maxRampPx: opts.snapWidth });
+                if (snap) {
+                    currentPost.depth = snap.depth;
+                    currentPost.points = snap.points;
+                    uvSrcIndex = snap.uvSrcIndex;
+                }
             }
+            currentWP = WorldPos.fromCameraPoints(
+                currentPost.points,
+                currentPost.width,
+                currentPost.height,
+                cleanedMask,
+                { scale: 1.0, applyMask: true }
+            );
+            currentNormalMap = NormalMap.create(
+                currentPost.normal,
+                currentPost.points,
+                currentPost.width,
+                currentPost.height,
+                cleanedMask
+            );
+            // エッジ混色帯のテクスチャ色パッチ（PLAN_EDGE_COLOR.md A案）。
+            // UV は元のまま、混色帯だけを各側の台地色で埋めた画像を表示/backfill に使う。
+            // Original ダウンロードは原本ファイルのまま。
+            currentPatchedImage = null;
+            if (opts.edgeThreshold < 1) {
+                currentPatchedImage = ColorPatch.apply({
+                    image: currentImageData,
+                    depth: currentPost.depth,
+                    validMask: cleanedMask,
+                    srcRoot: uvSrcIndex,
+                    width: currentPost.width,
+                    height: currentPost.height
+                });
+            }
+            const colorTex = colorTexFromImageData(currentPatchedImage || currentImageData);
+            Viewer.setData(
+                currentWP.data,
+                currentWP.width,
+                currentWP.height,
+                colorTex,
+                currentBaseName,
+                currentPost.intrinsics,
+                { disableDepthEdgeCleanup: opts.edgeThreshold >= 1, uvSrcIndex },
+                currentNormalMap
+            );
+            setDownloadEnabled(true);
+            $('dlDepthInitial').disabled = !currentDepthUpsampleDebug;
+            updateBackfill();
+        } finally {
+            recomputingPost = false;
+            if (showProgress) showLoading(false);
         }
-        currentWP = WorldPos.fromCameraPoints(
-            currentPost.points,
-            currentPost.width,
-            currentPost.height,
-            cleanedMask,
-            { scale: 1.0, applyMask: true }
-        );
-        currentNormalMap = NormalMap.create(
-            currentPost.normal,
-            currentPost.points,
-            currentPost.width,
-            currentPost.height,
-            cleanedMask
-        );
-        // エッジ混色帯のテクスチャ色パッチ（PLAN_EDGE_COLOR.md A案）。
-        // UV は元のまま、混色帯だけを各側の台地色で埋めた画像を表示/backfill に使う。
-        // Original ダウンロードは原本ファイルのまま。
-        currentPatchedImage = null;
-        if (opts.edgeThreshold < 1) {
-            currentPatchedImage = ColorPatch.apply({
-                image: currentImageData,
-                depth: currentPost.depth,
-                validMask: cleanedMask,
-                srcRoot: uvSrcIndex,
-                width: currentPost.width,
-                height: currentPost.height
-            });
+    }
+
+    function handleAsyncError(e) {
+        console.error(e);
+        showLoading(false);
+        alert('Processing failed:\n' + (e && e.message ? e.message : e));
+    }
+
+    function requestRecompute() {
+        if (isBusy()) {
+            reportBusy();
+            return;
         }
-        const colorTex = colorTexFromImageData(currentPatchedImage || currentImageData);
-        Viewer.setData(
-            currentWP.data,
-            currentWP.width,
-            currentWP.height,
-            colorTex,
-            currentBaseName,
-            currentPost.intrinsics,
-            { disableDepthEdgeCleanup: opts.edgeThreshold >= 1, uvSrcIndex },
-            currentNormalMap
-        );
-        setDownloadEnabled(true);
-        updateBackfill();
+        recompute(true).catch(handleAsyncError);
     }
 
     // 遮蔽穴インペイント（backfill.js）。推論・主レイヤーは再計算しない軽量パス。
@@ -223,6 +305,12 @@
 
     // ---- メイン処理: 画像 → 推論 → 表示 ----
     async function processImage(file) {
+        if (isBusy()) {
+            reportBusy();
+            return;
+        }
+        processingImage = true;
+        setDownloadEnabled(false);
         currentFile = file;
         currentBaseName = file.name.replace(/\.(jpg|jpeg|png)$/i, '');
 
@@ -255,8 +343,8 @@
             lastNumTokens = getNumTokens();
             currentMoge = await Inference.run(currentImageData, lastNumTokens);
 
-            showLoading(true, 'Computing world positions...');
-            recompute();
+            showLoading(true, 'Computing high-resolution depth and world positions...');
+            await recompute(false, true);
 
             const provider = Inference.getActiveProvider();
             $('executionProvider').textContent = provider ? provider.toUpperCase() : '--';
@@ -272,6 +360,8 @@
             console.error(e);
             showLoading(false);
             alert('Processing failed:\n' + (e && e.message ? e.message : e));
+        } finally {
+            processingImage = false;
         }
     }
 
@@ -300,6 +390,10 @@
     }
 
     function handleFiles(files) {
+        if (isBusy()) {
+            reportBusy();
+            return;
+        }
         if (!files || files.length === 0) return;
         let imageFile = null;
         for (const f of files) {
@@ -363,12 +457,12 @@
             const value = parseFloat(e.target.value);
             $('edgeThresholdValue').textContent = value >= 1 ? 'Off' : value.toFixed(3);
         });
-        $('edgeThreshold').addEventListener('change', recompute);
+        $('edgeThreshold').addEventListener('change', requestRecompute);
         $('snapWidth').addEventListener('input', (e) => {
             $('snapWidthValue').textContent = e.target.value;
         });
-        $('snapWidth').addEventListener('change', recompute);
-        $('maskMode').addEventListener('change', recompute);
+        $('snapWidth').addEventListener('change', requestRecompute);
+        $('maskMode').addEventListener('change', requestRecompute);
         $('fillOcclusion').addEventListener('change', updateBackfill);
         $('fillMargin').addEventListener('input', (e) => {
             $('fillMarginValue').textContent = e.target.value;
@@ -379,7 +473,7 @@
             if ((!modelReady || getNumTokens() !== lastNumTokens) && currentImageData) {
                 processImage(currentFile);
             } else {
-                recompute();
+                requestRecompute();
             }
         });
         // A full reload reliably releases ONNX/WebGPU resources and large typed
@@ -391,6 +485,15 @@
         $('dlDepth').addEventListener('click', () => {
             if (!currentPost) return;
             Downloader.saveDepthEXR(currentPost.depth, currentPost.width, currentPost.height, currentBaseName);
+        });
+        $('dlDepthInitial').addEventListener('click', () => {
+            if (!currentDepthUpsampleDebug) return;
+            Downloader.saveDepthEXRAs(
+                currentDepthUpsampleDebug.initialDepth,
+                currentDepthUpsampleDebug.width,
+                currentDepthUpsampleDebug.height,
+                `${currentBaseName}_depth_initial.exr`
+            );
         });
         $('dlNormal').addEventListener('click', () => {
             Downloader.saveNormalPNG(currentNormalMap, currentBaseName);
@@ -415,6 +518,23 @@
         $('exportOBJ').addEventListener('click', Viewer.exportOBJ);
         $('exportGLB').addEventListener('click', Viewer.exportGLB);
         $('exportPNG').addEventListener('click', Viewer.exportPNG);
+
+        updateDepthUpsampleLabels();
+        [
+            'depthUpsampleEnable',
+            'depthInitialMode',
+            'depthTreatZeroInvalid',
+            'depthInvalidValue'
+        ].forEach(id => $(id).addEventListener('change', requestRecompute));
+        [
+            'depthUpsampleRadius',
+            'depthSigmaSpace',
+            'depthSigmaColor',
+            'depthSigmaDepth'
+        ].forEach(id => {
+            $(id).addEventListener('input', updateDepthUpsampleLabels);
+            $(id).addEventListener('change', requestRecompute);
+        });
     }
 
     function restorePreferences() {
