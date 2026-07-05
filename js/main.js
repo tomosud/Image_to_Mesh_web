@@ -86,7 +86,10 @@
 
     function getOpts() {
         return {
-            applyMask: $('applyMask').checked,
+            // 'sky'   : mask 除去領域を最奥の書き割り平面として残す（既定）
+            // 'off'   : mask を適用せず、モデルの生の深度をそのまま使う
+            // 'remove': mask 領域を除去する（穴になる）
+            maskMode: $('maskMode').value,
             edgeThreshold: parseFloat($('edgeThreshold').value),
             snapWidth: parseInt($('snapWidth').value, 10)
         };
@@ -99,15 +102,32 @@
         currentPost = MogePost.process(currentMoge, { useMetric: true });
         const opts = getOpts();
         // エッジ画素の削除は EdgeSnap（スナップ+シーム分割）に置き換えたため、
-        // cleanDepthMask は無効深度と Apply Mask の処理のみに使う（rtol=1 で削除Off）。
-        const cleanedMask = MogePost.cleanDepthMask(
+        // cleanDepthMask は無効深度と mask の処理のみに使う（rtol=1 で削除Off）。
+        // maskMode 'sky'/'remove' は mask を適用して実ジオメトリを確定し、
+        // 'sky' はその後、除去された画素を最奥の書き割りで埋め戻す。
+        let cleanedMask = MogePost.cleanDepthMask(
             currentPost.depth,
             currentPost.mask,
             currentPost.width,
             currentPost.height,
             1,
-            opts.applyMask
+            opts.maskMode !== 'off'
         );
+        if (opts.maskMode === 'sky') {
+            const backdrop = MogePost.fillBackdrop(
+                currentPost.depth,
+                currentPost.points,
+                cleanedMask,
+                currentPost.intrinsics,
+                currentPost.width,
+                currentPost.height
+            );
+            if (backdrop) {
+                currentPost.depth = backdrop.depth;
+                currentPost.points = backdrop.points;
+                cleanedMask = backdrop.validMask;
+            }
+        }
         currentPost.cleanedMask = cleanedMask;
         // 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去）。
         // 吸着元 index は viewer が UV 差し替えに使う。
@@ -331,7 +351,7 @@
             $('snapWidthValue').textContent = e.target.value;
         });
         $('snapWidth').addEventListener('change', recompute);
-        $('applyMask').addEventListener('change', recompute);
+        $('maskMode').addEventListener('change', recompute);
         $('fillOcclusion').addEventListener('change', updateBackfill);
         $('fillMargin').addEventListener('input', (e) => {
             $('fillMarginValue').textContent = e.target.value;

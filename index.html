@@ -103,13 +103,12 @@
                     </div>
                 </div>
                 <div class="control-group">
-                    <div class="checkbox-with-help">
-                        <label class="chk">
-                            <input type="checkbox" id="applyMask" checked>
-                            Apply Mask (remove background / sky)
-                        </label>
-                        <span class="help-tip" tabindex="0" role="note" data-tooltip="Uses MoGe-2's validity mask to remove background, sky, uncertain regions, and their mesh faces. Disable it to retain more geometry." aria-label="Apply Mask help">?</span>
-                    </div>
+                    <label>Sky / Masked Area <span class="help-tip" tabindex="0" role="note" data-tooltip="MoGe-2 marks sky and uncertain regions as invalid. Sky Backdrop keeps those pixels and places them on a flat plane far behind the scene (2x the deepest valid point, at least 100m). Apply Mask OFF trusts the model's raw depth there instead. Apply Mask ON removes those regions, leaving holes." aria-label="Sky / Masked Area help">?</span></label>
+                    <select id="maskMode">
+                        <option value="sky" selected>Sky Backdrop — keep sky as a far plane</option>
+                        <option value="off">Apply Mask OFF — keep model depth as-is</option>
+                        <option value="remove">Apply Mask ON — remove sky / masked area</option>
+                    </select>
                 </div>
                 <div class="control-group">
                     <div class="checkbox-with-help">
@@ -180,7 +179,7 @@
 
     <!-- App modules -->
     <script src="js/exr.js?v=20260620-13"></script>
-    <script src="js/moge_post.js?v=20260620-13"></script>
+    <script src="js/moge_post.js?v=20260705-2"></script>
     <script src="js/edgesnap.js?v=20260705-1"></script>
     <script src="js/worldpos.js?v=20260620-13"></script>
     <script src="js/normalmap.js?v=20260620-13"></script>
@@ -188,6 +187,6 @@
     <script src="js/viewer.js?v=20260705-1"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260704-1"></script>
-    <script src="js/main.js?v=20260705-1"></script>
+    <script src="js/main.js?v=20260705-2"></script>
 </body>
 </html>

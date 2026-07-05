@@ -106,11 +106,15 @@ Maximum width (in pixels) of the soft depth ramp that is snapped to the neighbor
 - Default: `4`
 - Increase if wide or blurred edges still leave stretched geometry
 
-### Apply Mask
+### Sky / Masked Area
 
-Uses MoGe-2's validity mask to remove background, sky, and uncertain regions. Changes are applied immediately without rerunning inference.
+MoGe-2 marks sky, transparent/reflective surfaces, and uncertain regions as invalid. This selector decides what happens to those pixels. Changes are applied immediately without rerunning inference.
 
-To preserve as much geometry as possible, set **Edge Threshold** to `Off` and disable **Apply Mask**. Invalid or non-positive depth values still cannot form geometry.
+- **Sky Backdrop** (default): keeps the masked pixels and places them on a flat plane far behind the scene, at `max(2 × deepest valid depth, 100 m)`. The original image colors are used, so the sky becomes a natural matte-painting backdrop. The boundary against foreground geometry is handled by the normal edge snapping and splitting.
+- **Apply Mask OFF**: keeps the model's raw predicted depth for masked pixels. The sky may appear at an arbitrary distance (the model has no supervision there).
+- **Apply Mask ON**: removes the masked regions entirely, leaving holes.
+
+Invalid or non-positive depth values still cannot form geometry in the OFF mode.
 
 ## Display Controls
 
@@ -171,14 +175,14 @@ Depth EXR remains in the original camera-depth coordinate system.
 
 - Lower **Edge Threshold**.
 - Raise **Snap Width** for wide or blurred edges.
-- Enable **Apply Mask**.
+- Set **Sky / Masked Area** to Sky Backdrop or Apply Mask ON.
 - Increase Quality if memory permits.
 
 ### Too much geometry is missing or split apart
 
 - Raise **Edge Threshold**.
 - Set Edge Threshold to `Off` for no edge snapping and splitting.
-- Disable **Apply Mask** if the predicted validity mask removes useful areas.
+- Set **Sky / Masked Area** to Apply Mask OFF if the validity mask removes useful areas.
 
 ### Rotation feels tilted or uses the wrong axis
 

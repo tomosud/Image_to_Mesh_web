@@ -258,5 +258,41 @@ const MogePost = (function () {
         return mask;
     }
 
-    return { process, recoverFocalShift, cleanDepthMask };
+    // 空の書き割り（Sky Backdrop）: mask が除去する画素（空・不確実領域・無効深度）を
+    // 削除する代わりに「有効画素の最大深度×2 か 100m の大きい方」の一定Z平面として
+    // レイ上に再配置する。色は元画像の UV がそのまま使われるため、遠景のマット
+    // ペインティングとして違和感なく最奥に置かれる。
+    // 建物等との境界の大段差は EdgeSnap + シーム分割が通常のエッジとして処理する。
+    // validMask: 1=実ジオメトリ（cleanDepthMask の結果）。戻り値の validMask は全画素 1。
+    function fillBackdrop(depth, points, validMask, intrinsics, W, H) {
+        let maxD = 0;
+        for (let i = 0; i < W * H; i++) {
+            if (validMask[i] && depth[i] > maxD) maxD = depth[i];
+        }
+        if (!(maxD > 0)) return null; // 有効画素なし（backdrop の基準が取れない）
+        const dFar = Math.max(maxD * 2, 100);
+
+        const outDepth = Float32Array.from(depth);
+        const outPoints = Float32Array.from(points);
+        const outMask = new Uint8Array(W * H).fill(1);
+        const { fx, fy, cx, cy } = intrinsics;
+        let filled = 0;
+        for (let y = 0; y < H; y++) {
+            const v01 = (y + 0.5) / H;
+            for (let x = 0; x < W; x++) {
+                const i = y * W + x;
+                if (validMask[i]) continue;
+                const u01 = (x + 0.5) / W;
+                outDepth[i] = dFar;
+                outPoints[i * 3] = (u01 - cx) / fx * dFar;
+                outPoints[i * 3 + 1] = (v01 - cy) / fy * dFar;
+                outPoints[i * 3 + 2] = dFar;
+                filled++;
+            }
+        }
+        console.log('[MogePost backdrop]', { dFar: dFar.toFixed(2), maxValidDepth: maxD.toFixed(2), filled });
+        return { depth: outDepth, points: outPoints, validMask: outMask, backdropDepth: dFar };
+    }
+
+    return { process, recoverFocalShift, cleanDepthMask, fillBackdrop };
 })();

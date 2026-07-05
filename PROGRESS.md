@@ -10,6 +10,7 @@
 
 1. `js/inference.js`: MoGe-2 ONNX 推論。ViT-S / ViT-B / ViT-L、`num_tokens`、WebGPU → WASM フォールバック、Cache API に対応。
 2. `js/moge_post.js`: point map から focal/shift を復元し、正規化 intrinsics、metric depth、camera-space point map、二値 mask を生成。
+2a. `MogePost.fillBackdrop`: Sky Backdrop モード時、mask 除去画素を最奥の一定Z平面へ再投影して埋め戻す。
 2b. `js/edgesnap.js`: 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去、画素削除なし）。吸着元 index を UV 差し替えに渡す。Edge Threshold が検出しきい値、Snap Width が伝播上限。
 3. `js/worldpos.js`: camera-space `(X right, Y down, Z forward)` を Y-up の `(-X, -Y, Z)` へ変換し、表示スケールと mask を適用。
 4. `js/backfill.js`: エッジ切断で生じた穴を、奥側エッジのみから深度（disparity平面フィット+ラプラス平滑化）と色（プルプッシュ+拡散）で伸長し、第2レイヤー（world position + テクスチャ）を生成（PLAN_INPAINT.md）。
@@ -22,7 +23,8 @@
 - [x] MoGe-2 ViT-S / ViT-B / ViT-L の切り替え
 - [x] WebGPU 推論と WASM フォールバック
 - [x] モデルのブラウザキャッシュと選択モデルの保存
-- [x] `num_tokens`、Scale、Apply Mask の UI
+- [x] `num_tokens`、Scale、Sky / Masked Area（3択: Sky Backdrop / Apply Mask OFF / ON）の UI
+- [x] Sky Backdrop: mask 除去領域（空など）を `max(有効最大深度×2, 100m)` の一定Z平面（書き割り）として最奥に残す（2026-07-05、既定モード。`MogePost.fillBackdrop`）
 - [x] focal/shift、intrinsics、metric scale の後処理
 - [x] Y-up World Position の生成
 - [x] メッシュ、点群、ワイヤーフレーム、Unlit、No Color 表示
