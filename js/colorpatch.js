@@ -1,4 +1,4 @@
-// colorpatch.js — エッジ混色帯のテクスチャ色パッチ（PLAN_EDGE_COLOR.md A案）
+// colorpatch.js — エッジ混色帯のテクスチャ色パッチ（docs/archive/PLAN_EDGE_COLOR_HISTORY.md A案）
 // 深度エッジ周辺のテクスチャ画素は手前/奥の混色（撮像時のボケ・AA）を含む。
 // UV は元のまま（連続）とし、**元画像解像度**で混色帯だけを「自分側の台地の色」
 // で埋め直した表示/エクスポート用の画像を作る。

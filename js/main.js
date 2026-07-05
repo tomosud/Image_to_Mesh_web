@@ -177,7 +177,9 @@
                 1,
                 opts.maskMode !== 'off'
             );
+            let skyBackdropMask = null;
             if (opts.maskMode === 'sky') {
+                skyBackdropMask = new Uint8Array(cleanedMask);
                 const backdrop = MogePost.fillBackdrop(
                     currentPost.depth,
                     currentPost.points,
@@ -195,7 +197,7 @@
             currentPost.cleanedMask = cleanedMask;
             // 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去）。
             // uvSrcIndex（吸着元 index）は現在未使用（UV差し替えは廃止、
-            // PLAN_EDGE_COLOR.md。将来の色パッチ用に配線は残す）。
+            // docs/archive/PLAN_EDGE_COLOR_HISTORY.md。将来の色パッチ用に配線は残す）。
             let uvSrcIndex = null;
             if (opts.edgeThreshold < 1) {
                 const snap = EdgeSnap.process({
@@ -225,13 +227,23 @@
                 currentPost.height,
                 cleanedMask
             );
-            // エッジ混色帯のテクスチャ色パッチ（PLAN_EDGE_COLOR.md A案）。
+            // エッジ混色帯のテクスチャ色パッチ（docs/archive/PLAN_EDGE_COLOR_HISTORY.md A案）。
             // UV は元のまま、混色帯だけを各側の台地色で埋めた画像を表示/backfill に使う。
             // Original ダウンロードは原本ファイルのまま。
             currentPatchedImage = null;
+            let colorSource = currentImageData;
+            if (skyBackdropMask) {
+                colorSource = SkyMaskColorFill.apply({
+                    image: colorSource,
+                    validMask: skyBackdropMask,
+                    width: currentPost.width,
+                    height: currentPost.height,
+                    radius: 4
+                }) || colorSource;
+            }
             if (opts.edgeThreshold < 1) {
                 currentPatchedImage = ColorPatch.apply({
-                    image: currentImageData,
+                    image: colorSource,
                     depth: currentPost.depth,
                     validMask: cleanedMask,
                     srcRoot: uvSrcIndex,
@@ -239,6 +251,7 @@
                     height: currentPost.height
                 });
             }
+            currentPatchedImage = currentPatchedImage || (colorSource !== currentImageData ? colorSource : null);
             const colorTex = colorTexFromImageData(currentPatchedImage || currentImageData);
             Viewer.setData(
                 currentWP.data,
@@ -247,7 +260,11 @@
                 colorTex,
                 currentBaseName,
                 currentPost.intrinsics,
-                { disableDepthEdgeCleanup: opts.edgeThreshold >= 1, uvSrcIndex },
+                {
+                    disableDepthEdgeCleanup: opts.edgeThreshold >= 1,
+                    uvSrcIndex,
+                    preserveCamera: !fromProcessImage
+                },
                 currentNormalMap
             );
             setDownloadEnabled(true);

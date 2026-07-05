@@ -62,6 +62,8 @@ const Viewer = (function () {
         pointerNdc = new THREE.Vector2();
         selectionMarkers = new THREE.Group();
         scene.add(selectionMarkers);
+        canvas.addEventListener('mousedown', onMayaMouseGate, true);
+        canvas.addEventListener('contextmenu', (event) => event.preventDefault());
         canvas.addEventListener('pointerdown', onSelectionPointerDown);
         canvas.addEventListener('pointerup', onSelectionPointerUp);
         window.addEventListener('keydown', (event) => {
@@ -98,6 +100,7 @@ const Viewer = (function () {
     // colorTex: { data: Uint8Array RGBA, width, height } | null
     function setData(worldPos, w, h, colorTex, baseName, intrinsics, viewerOptions, normalTex) {
         init();
+        const options = viewerOptions || {};
         currentWorldPosData = { data: worldPos, width: w, height: h };
         currentColorTexture = colorTex || null;
         if (currentTextureObject) currentTextureObject.dispose();
@@ -107,8 +110,8 @@ const Viewer = (function () {
         currentNormalTextureObject = null;
         currentBaseName = baseName || 'mesh';
         currentIntrinsics = intrinsics || null;
-        currentViewerOptions = viewerOptions || {};
-        createMesh(false);
+        currentViewerOptions = options;
+        createMesh(!!options.preserveCamera);
     }
 
     function createMesh(skipCameraReset) {
@@ -128,7 +131,7 @@ const Viewer = (function () {
 
         // 色の UV は常に元画像のまま（深度のみ EdgeSnap でスナップ）。
         // UV も吸着元へ差し替える方式はモデル解像度粒度のブロック/スジが出たため
-        // 廃止（PLAN_EDGE_COLOR.md）。エッジの混色はテクスチャ側に残る。
+        // 廃止（docs/archive/PLAN_EDGE_COLOR_HISTORY.md）。エッジの混色はテクスチャ側に残る。
         for (let i = 0; i < positions.length; i += 3) {
             const vertexIndex = i / 3;
             const row = Math.floor(vertexIndex / meshWidth);
@@ -320,12 +323,26 @@ const Viewer = (function () {
         controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
-        controls.screenSpacePanning = false;
+        controls.zoomSpeed = 0.4;
+        controls.screenSpacePanning = true;
+        controls.mouseButtons = {
+            LEFT: THREE.MOUSE.ROTATE,
+            MIDDLE: THREE.MOUSE.PAN,
+            RIGHT: THREE.MOUSE.DOLLY
+        };
         controls.minDistance = 0.1;
         controls.maxDistance = 1000;
         controls.minPolarAngle = frontSideOnly ? 0.001 : 0;
         controls.maxPolarAngle = frontSideOnly ? Math.PI * 0.5 - 0.001 : Math.PI;
         controls.target.copy(target);
+    }
+
+    function onMayaMouseGate(event) {
+        if (!controls) return;
+        if ((event.button === 0 || event.button === 1 || event.button === 2) && !event.altKey) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }
     }
 
     // 主メッシュ用: 深度段差をまたぐセルを「削除」せず「切り離す」。
@@ -364,7 +381,7 @@ const Viewer = (function () {
             );
             // UV は延長元（同じプレート側）の角からコピー。テクスチャは ColorPatch 済み
             // なので延長面は自分側の純色になる（複製元の UV のままだと、延長面が
-            // 相手側の色を拾ってフリンジになる。PLAN_EDGE_COLOR.md 3.6）
+            // 相手側の色を拾ってフリンジになる。docs/archive/PLAN_EDGE_COLOR_HISTORY.md 3.6）
             extraUV.push(uvs[ref * 2], uvs[ref * 2 + 1]);
             return index;
         }
@@ -581,6 +598,22 @@ const Viewer = (function () {
         document.getElementById('rangeZ').textContent = `[${bounds.minZ.toFixed(2)}, ${bounds.maxZ.toFixed(2)}]`;
     }
 
+    function getInitialOrbitCenter(bounds) {
+        if (!bounds) {
+            if (!currentWorldPosData) return new THREE.Vector3();
+            bounds = calculateBounds(currentWorldPosData.data);
+        }
+        const center = new THREE.Vector3(
+            (bounds.minX + bounds.maxX) * 0.5,
+            (bounds.minY + bounds.maxY) * 0.5,
+            (bounds.minZ + bounds.maxZ) * 0.5
+        );
+        if (hasValidIntrinsics(currentIntrinsics) && bounds.minZ > 0) {
+            return new THREE.Vector3(0, 0, center.z);
+        }
+        return center;
+    }
+
     function updateMaterial() {
         if (isPointsMode && pointsMesh) {
             const old = pointsMesh.material;
@@ -621,9 +654,15 @@ const Viewer = (function () {
         );
 
         cancelOrbitPlaneAdjustment(true);
-        const adjustedPlane = activeOrbitPlane;
-        camera.up.copy(adjustedPlane ? adjustedPlane.normal : new THREE.Vector3(0, 1, 0));
-        createOrbitControls(new THREE.Vector3(), !!adjustedPlane);
+        const resetTarget = activeOrbitPlane
+            ? activeOrbitPlane.center.clone()
+            : getInitialOrbitCenter(bounds);
+
+        // Reset View restores the estimated source-camera position. When a
+        // horizontal grid is active, only its normal changes; the pivot stays
+        // at the initial source-camera target.
+        camera.up.set(0, 1, 0);
+        createOrbitControls(new THREE.Vector3(), false);
         if (hasValidIntrinsics(currentIntrinsics) && bounds.minZ > 0) {
             // WorldPos flips camera X/Y while preserving Z. Looking from the
             // estimated camera origin toward +Z therefore reproduces the source
@@ -633,10 +672,11 @@ const Viewer = (function () {
             const vfovForWidth = 2 * Math.atan(Math.tan(sourceHfov * 0.5) / camera.aspect);
             camera.fov = THREE.MathUtils.radToDeg(Math.max(sourceVfov, vfovForWidth)) * 1.02;
             camera.position.set(0, 0, 0);
-            controls.target.set(0, 0, center.z);
+            controls.target.copy(resetTarget);
         } else {
             // Fallback for imported/invalid data: fit the bounds from the same
             // front side as the source camera, without the previous X/Y offset.
+            const fallbackTarget = activeOrbitPlane ? activeOrbitPlane.center : center;
             camera.fov = 60;
             const vfov = THREE.MathUtils.degToRad(camera.fov);
             const hfov = 2 * Math.atan(Math.tan(vfov * 0.5) * camera.aspect);
@@ -645,8 +685,8 @@ const Viewer = (function () {
                 size.x * 0.5 / Math.tan(hfov * 0.5)
             ) * 1.1;
             const distance = Math.max(fitDistance, size.z * 0.5 + Math.max(fitDistance * 0.05, 1e-3));
-            camera.position.set(center.x, center.y, center.z - distance);
-            controls.target.copy(center);
+            camera.position.set(fallbackTarget.x, fallbackTarget.y, fallbackTarget.z - distance);
+            controls.target.copy(fallbackTarget);
         }
 
         const distance = camera.position.distanceTo(controls.target);
@@ -678,7 +718,7 @@ const Viewer = (function () {
         orbitPlanePoints = [];
         clearSelectionMarkers();
 
-        const currentCenter = activeOrbitPlane ? activeOrbitPlane.center : controls.target;
+        const currentCenter = activeOrbitPlane ? activeOrbitPlane.center : getInitialOrbitCenter();
         const currentNormal = activeOrbitPlane ? activeOrbitPlane.normal : camera.up.clone().normalize();
         showOrbitPlaneHelper(currentCenter, currentNormal, getSceneDiagonal() * 0.25);
         renderer.domElement.classList.add('selecting-orbit-plane');
@@ -839,16 +879,17 @@ const Viewer = (function () {
         }
 
         normal.normalize();
-        const center = p0.clone().add(p1).add(p2).multiplyScalar(1 / 3);
+        const selectedCenter = p0.clone().add(p1).add(p2).multiplyScalar(1 / 3);
+        const pivotCenter = getInitialOrbitCenter();
         const frontReference = hasValidIntrinsics(currentIntrinsics)
-            ? center.clone().negate()
-            : camera.position.clone().sub(center);
+            ? selectedCenter.clone().negate()
+            : camera.position.clone().sub(selectedCenter);
         // Point order only changes the sign. Prefer the estimated source-camera
         // side so Reset View always returns to the selected plane's front side.
         if (normal.dot(frontReference) < 0) normal.negate();
 
-        pendingOrbitPlane = { center: center.clone(), normal: normal.clone(), size: maxEdge };
-        showOrbitPlaneHelper(center, normal, maxEdge);
+        pendingOrbitPlane = { center: pivotCenter.clone(), normal: normal.clone(), size: maxEdge };
+        showOrbitPlaneHelper(pivotCenter, normal, maxEdge);
 
         orbitPlaneSelectionActive = false;
         orbitPlanePoints = [];
@@ -869,9 +910,9 @@ const Viewer = (function () {
             cameraOffset.addScaledVector(activeOrbitPlane.normal, -2 * side);
             camera.position.copy(activeOrbitPlane.center).add(cameraOffset);
         }
-        camera.up.copy(activeOrbitPlane.normal);
+        camera.up.set(0, 1, 0);
         // OrbitControls r128 caches the up-axis transform at construction.
-        createOrbitControls(activeOrbitPlane.center, true);
+        createOrbitControls(activeOrbitPlane.center, false);
         camera.lookAt(activeOrbitPlane.center);
         controls.update();
         cancelOrbitPlaneAdjustment(true);

@@ -417,7 +417,7 @@ Apply Mask チェックボックスを「Sky / Masked Area」3択セレクトへ
 
 実機確認で2点の問題を確認（看板フチのブロック状の乱れ、空境界の縦スジ、
 backfill 色への手前色の混入）。原因分析と解決案（推奨: UVスナップ廃止 +
-元画像解像度でのテクスチャ色パッチ）は [PLAN_EDGE_COLOR.md](PLAN_EDGE_COLOR.md) 参照。未実装。
+元画像解像度でのテクスチャ色パッチ）は [PLAN_EDGE_COLOR_HISTORY.md](PLAN_EDGE_COLOR_HISTORY.md) 参照。未実装。
 
 ---
 

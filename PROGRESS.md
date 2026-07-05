@@ -4,74 +4,58 @@
 
 ## 現在の構成
 
-単一画像をブラウザ内で MoGe-2 に入力し、深度・ワールドポジション・メッシュを生成する。画像と推論結果は外部へ送信しない。モデルと JavaScript ライブラリの初回取得時のみネットワークを使用する。
+単一画像をブラウザ内で MoGe-2 に入力し、metric depth、world position、メッシュ、backfill を生成する。画像と推論結果は外部へ送信しない。モデルと JavaScript ライブラリの初回取得時のみネットワークを使用する。
 
-処理パイプライン（各段階が何を変更するかの詳細解説は [PIPELINE.md](PIPELINE.md)）:
-
-1. `js/inference.js`: MoGe-2 ONNX 推論。ViT-S / ViT-B / ViT-L、`num_tokens`、WebGPU → WASM フォールバック、Cache API に対応。
-2. `js/moge_post.js`: point map から focal/shift を復元し、正規化 intrinsics、metric depth、camera-space point map、二値 mask を生成。
-2a. `MogePost.fillBackdrop`: Sky Backdrop モード時、mask 除去画素を最奥の一定Z平面へ再投影して埋め戻す。
-2c. `js/colorpatch.js`: エッジ混色帯を元画像解像度で「自分側の台地の色」に埋め直したテクスチャを生成（UVは元のまま）。表示と backfill の色入力に使用（PLAN_EDGE_COLOR.md）。
-2b. `js/edgesnap.js`: 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去、画素削除なし）。吸着元 index を UV 差し替えに渡す。Edge Threshold が検出しきい値、Snap Width が伝播上限。
-3. `js/worldpos.js`: camera-space `(X right, Y down, Z forward)` を Y-up の `(-X, -Y, Z)` へ変換し、表示スケールと mask を適用。
-4. `js/backfill.js`: エッジ切断で生じた穴を、奥側エッジのみから深度（disparity平面フィット+ラプラス平滑化）と色（プルプッシュ+拡散）で伸長し、第2レイヤー（world position + テクスチャ）を生成（PLAN_INPAINT.md）。
-5. `js/viewer.js`: three.js でテクスチャ付きメッシュまたは点群を表示。無効画素の面を除去し、深度段差セルは削除せず near/far 2枚のプレートへ分割（頂点複製で各1セル延長、正面ビュー隙間ゼロ）。第2レイヤーは `BackfillMesh` として表示・GLB 出力。
-6. `js/download.js` / `js/exr.js`: 元画像、Depth EXR、World Position EXR、Backfill WorldPos EXR / Texture PNG、OBJ、2048×2048 PNG を出力。
+処理順と各段階が変更する対象は [PIPELINE.md](PIPELINE.md) を正本とする。ユーザー向けの使い方と UI 仕様は [README.md](README.md) を正本とする。
 
 ## 実装済み
 
-- [x] JPG / PNG のドロップとファイル選択
-- [x] MoGe-2 ViT-S / ViT-B / ViT-L の切り替え
-- [x] WebGPU 推論と WASM フォールバック
-- [x] モデルのブラウザキャッシュと選択モデルの保存
-- [x] `num_tokens`、Scale、Sky / Masked Area（3択: Sky Backdrop / Apply Mask OFF / ON）の UI
-- [x] Sky Backdrop: mask 除去領域（空など）を `max(有効最大深度×2, 100m)` の一定Z平面（書き割り）として最奥に残す（2026-07-05、既定モード。`MogePost.fillBackdrop`）
-- [x] focal/shift、intrinsics、metric scale の後処理
-- [x] Y-up World Position の生成
-- [x] メッシュ、点群、ワイヤーフレーム、Unlit、No Color 表示
-- [x] mask による不要面の除去
-- [x] 深度エッジのスナップ + シーム分割（旧: 頂点・面削除方式を 2026-07-05 に置き換え。Edge Threshold=検出しきい値 0.005〜1.000 既定0.045 / Snap Width=伝播上限 1〜32px 既定4。エッジのランプ画素を両側の台地へ吸着し UV も吸着元へ差し替え、段差セルは near/far 2枚のプレートに分割して各1セル延長 → 正面ビューの隙間ゼロ。PLAN_INPAINT.md 2026-07-05 ログ参照）— 実機検証待ち
-- [x] 推定 intrinsics を使った正面初期カメラと Reset View
-- [x] 3点指定による水平面・回転中心・手前側の設定
-- [x] 確定済み水平グリッドへの OBJ 座標変換（中心=原点、法線=+Y）
-- [x] 水平グリッドへ変換した World Position EXR
-- [x] 変換済みメッシュ・テクスチャ・推定元カメラ・現在カメラを含む Scene GLB
-- [x] Depth EXR / World Position EXR / OBJ / PNG の出力
-- [x] GitHub Pages デプロイ設定
-- [x] 遮蔽穴インペイント（Fill Occlusion / Fill Margin、第2レイヤー表示、Backfill EXR/PNG、GLB `BackfillMesh`）— 実画像で検証済み。確定仕様は PLAN_INPAINT.md「8.5 確定実装スナップショット」参照
+- MoGe-2 ViT-S / ViT-B / ViT-L の WebGPU 推論と WASM フォールバック
+- `num_tokens`、モデル選択、Scale、Sky / Masked Area、High-Res Depth、EdgeSnap、Backfill の UI
+- MoGe point map から focal / shift / intrinsics / metric depth / camera-space points を復元
+- 入力画像比率・長辺最大 2048px の depth 高解像度化
+- WebGPU RGB-guided Joint Bilateral Filter と、WebGPU 不可時の初期拡大 fallback
+- Sky Backdrop による mask 領域の最奥平面化
+- SkyMaskColorFill による空 mask 内周4pxの色補正
+- EdgeSnap による depth ランプの near/far 台地への吸着
+- ColorPatch によるエッジ混色帯の表示/backfill 用テクスチャ補正
+- Y-up world position 生成、メッシュ / 点群 / ワイヤーフレーム / Unlit / No Color 表示
+- Adjust Horizontal Grid は aligned export 用の地平方向だけを設定し、scene origin / grid 表示位置 / orbit pivot は初期ターゲットに固定する
+- Reset View は推定ソースカメラ位置・上方向・初期ターゲットへ戻す。grid 設定後も中心は変えない
+- カメラ操作は Maya 風の `Alt+左=orbit` / `Alt+中=pan` / `Alt+右=dolly`。dolly は低速化
+- カメラ情報が変わらない後処理パラメータ変更では、現在のビューを維持したままメッシュだけ更新
+- depth 段差セルの near/far 2枚プレート分割と各1セル延長
+- 奥側エッジ由来の Backfill 第2レイヤー
+- Depth EXR、Initial Depth EXR、World Position EXR、Backfill EXR/PNG、OBJ、Scene GLB、2048 PNG 出力
+- 連続処理時に ONNX Runtime session へ並列 `run()` が入らないための排他ガード
 
-## カメラ仕様
+## 現在の既定値
 
-MoGe 後処理が返す正規化 `fx/fy` から水平・垂直画角を計算する。初期表示と Reset View は推定カメラ原点 `(0, 0, 0)` から `+Z` を向く。`worldpos.js` が X/Y を反転しているため、この向きで入力画像と同じ上下左右になる。
-
-ビューアのアスペクト比が入力画像と異なる場合は、水平・垂直の両方が収まるよう垂直 FOV を拡張する。intrinsics が不正、または正の深度範囲が得られない場合は、メッシュ境界を正面から収めるフォールバックを使用する。
-
-`Adjust Horizontal Grid` では現在の回転平面を先に表示し、同一平面上の3点から候補グリッドをプレビューする。`Use This Grid` で重心を OrbitControls の中心、平面法線を上方向として確定し、`Cancel` で破棄する。確定・取消後は初期ボタン表示へ戻る。確定後はグリッドを非表示にするが設定は保持し、Reset View でも推定カメラ位置から確定済みの中心を向くビューを再構成する。
+- Quality (`num_tokens`): `1800`
+- High-Res Depth: ON
+- High-Res Depth long edge: `2048px`
+- Initial Depth Resize: `Bilinear`
+- Edge Threshold: `0.010`
+- Snap Width: `8`
+- Sky / Masked Area: Sky Backdrop
+- SkyMaskColorFill inner ring: `4px`
 
 ## 要実機確認
 
 - 複数の縦長・横長画像で、初期表示の向き、余白、Reset View を確認する。
-- ViT-S / ViT-B / ViT-L の focal/shift 復元結果を比較する。
+- ViT-S / ViT-B / ViT-L の focal / shift 復元結果を比較する。
+- WebGPU 使用時と fallback 時の High-Res Depth ステータスと出力差分を確認する。
+- `Initial Depth (EXR)` と `Depth (EXR)` を比較し、JBU と後段処理の差を確認する。
 - Apply Mask の有無で不要面除去とカメラクリップ範囲を確認する。
 - 出力 EXR を Houdini などで読み、チャンネルと座標系を確認する。
 - 大容量モデルの初回ダウンロード、Cache API、WebGPU → WASM 切り替えを実ブラウザで確認する。
 
-## 参考
+## 履歴
 
-- 現行の利用方法と仕様: [README.md](README.md)
-- MoGe-2 移行時の設計記録: [PLAN_MOGE.md](PLAN_MOGE.md)
-- 初期 DA3 版の設計記録: [PLAN.md](PLAN.md)
+完了済みの計画・検討ログは root から外し、`docs/archive/` に退避した。
 
-## 2026-07-05 depth 高解像度化
-
-- `js/depth_upsample.js` を追加し、MoGe 後処理直後の metric depth を入力画像比率・長辺最大 2048px へ拡大する処理を実装。
-- WebGPU が使える場合は RGB-guided Joint Bilateral Filter を WGSL compute shader で実行。depth は計算中 float32 メートル単位のまま保持。
-- WebGPU が使えない場合は初期拡大（nearest / bilinear）を返す fallback とし、既存 Tool の WASM/非 WebGPU 動作を維持。
-- 高解像度 depth から camera-space points を再投影し、既存の mask cleanup / Sky Backdrop / EdgeSnap / WorldPos / NormalMap / Backfill / Viewer / EXR export に流す形で統合。
-- UI に High-Res Depth、初期拡大方式、radius、sigmaSpace、sigmaColor、sigmaDepthMeters、invalid depth 設定を追加。
-- デバッグ用に `Initial Depth (EXR)` ダウンロードを追加。最終 `Depth (EXR)` はフィルタ後の高解像度 depth。
-- 構文確認: `node --check js/depth_upsample.js`、`node --check js/main.js`、`node --check js/download.js` は PASS。
-- ブラウザ実機確認は `CLAUDE.md` ルールどおりユーザー側で実施予定。
-- 連続ドロップ/選択/再計算で ONNX Runtime の同一 session に並列 `run()` が入らないよう、`processImage` と `recompute` に排他ガードを追加。処理中の追加要求は警告して無視する。
-- High-Res Depth の長文 tooltip がパネル内で読みにくかったため、各 depth upsample パラメータの説明を `Depth parameter guide` の折りたたみ表示へ移動。
-- `Edge Threshold` / `Snap Width` の説明を実装に合わせて修正。`Snap Width` は「ぼけ幅」ではなく、検出済みエッジ画素へ安定した near/far depth を伝播する最大パス数。
+- [初期 DA3 版計画](docs/archive/PLAN_DA3_INITIAL.md)
+- [MoGe-2 移行計画](docs/archive/PLAN_MOGE_MIGRATION.md)
+- [Backfill / EdgeSnap 履歴](docs/archive/PLAN_INPAINT_HISTORY.md)
+- [Edge Color / ColorPatch 履歴](docs/archive/PLAN_EDGE_COLOR_HISTORY.md)
+- [Depth Upsampling 履歴](docs/archive/PLAN_DEPTH_UPSAMPLE_HISTORY.md)

@@ -60,9 +60,16 @@ For tabletop scenes or images shot from above, the default image-up axis may not
 3. Check the preview grid and yellow up/front arrow.
 4. Click **Use This Grid** to apply it, or **Cancel** to discard it.
 
-The order of the three points does not matter. Their center becomes the orbit center, and the plane normal becomes the new up axis. After confirmation, the grid disappears but the calibration remains active.
+The order of the three points does not matter. The selected points define the horizontal direction only. The scene origin, grid display position, and Maya-style orbit pivot stay at the initial source-camera target.
 
-**Reset View** restores the estimated source-camera position and original image-center target while retaining the adjusted horizontal rotation axis.
+**Reset View** restores the estimated source-camera position, source-camera up axis, and initial target. If a horizontal grid is active, only the aligned export normal changes; the camera target and orbit pivot stay at the initial target.
+
+Camera navigation follows Maya-style mouse chords:
+
+- `Alt + Left drag`: orbit/tumble around the current pivot
+- `Alt + Middle drag`: pan/track
+- `Alt + Right drag`: slow dolly
+- Mouse wheel: slow dolly
 
 ## Inference and Geometry Settings
 
@@ -104,7 +111,7 @@ Controls EdgeSnap detection of sharp depth discontinuities. The implementation c
 Marked pixels are not deleted. Stable neighboring depth areas propagate into the marked pixels, so in-between ramp values are replaced by the nearest near/far surface in log-depth space. The viewer also enables mesh seam splitting while Edge Threshold is not `Off`; the actual face-splitting test uses a fixed `0.10` relative depth jump.
 
 - Range: `0.005`–`1.000`
-- Default: `0.045`
+- Default: `0.010`
 - Lower values detect and split more edges
 - Higher values keep more surfaces connected but may leave stretched geometry
 - `1.000` displays as `Off` and disables edge snapping and splitting
@@ -118,7 +125,7 @@ If surfaces that belong together get split apart, raise the value. If long stret
 Maximum number of EdgeSnap propagation passes from stable depth areas into marked edge pixels.
 
 - Range: `1`–`32`
-- Default: `4`
+- Default: `8`
 - Increase if thick detected ramps still leave in-between depth values
 - Pixels not reached within this limit keep their original depth
 
@@ -140,7 +147,7 @@ Invalid or non-positive depth values still cannot form geometry in the OFF mode.
 - **No Color**: hide the source-image color
 - **Wireframe**: show mesh triangle edges
 - **Reset View**: restore the estimated source-camera view
-- **Adjust Horizontal Grid**: set the scene's horizontal axis and orbit center from three points
+- **Adjust Horizontal Grid**: set the aligned export plane direction from three points while keeping the initial orbit pivot
 - **Show Capture Frame**: preview the square PNG export region
 - **UI OFF / UI ON**: hide or restore interface panels
 

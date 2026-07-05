@@ -1,4 +1,4 @@
-// backfill.js — 遮蔽穴インペイント（PLAN_INPAINT.md 参照）
+// backfill.js — 遮蔽穴インペイント（docs/archive/PLAN_INPAINT_HISTORY.md 参照）
 // viewer が深度段差で面を除去して開く「幅ゼロの隙間」と、エッジ切断で消えた画素の両方を対象に、
 // 深度不連続の奥側画素を種として深度（disparity 平面フィット + ラプラス平滑化）と
 // 色（プルプッシュ + 拡散）を前景の裏へ伸長し、第2レイヤー（world position + テクスチャ）を生成する。
