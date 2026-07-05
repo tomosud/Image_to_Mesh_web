@@ -311,6 +311,11 @@
         return Number.isFinite(value) ? value : 4.0;
     }
 
+    function getBackfillFarPriorityPx() {
+        const value = parseInt($('backfillFarPriority').value, 10);
+        return Number.isFinite(value) ? Math.max(0, value) : 12;
+    }
+
     function getSmallComponentMinFaces() {
         const value = parseInt($('smallComponentFaces').value, 10);
         return Number.isFinite(value) ? Math.max(0, value) : 64;
@@ -340,6 +345,10 @@
         $('backfillFarClampValue').textContent = `${getBackfillFarClamp().toFixed(1)}x`;
     }
 
+    function updateBackfillFarPriorityLabel() {
+        $('backfillFarPriorityValue').textContent = String(getBackfillFarPriorityPx());
+    }
+
     // 遮蔽穴インペイント（backfill.js）。推論・主レイヤーは再計算しない軽量パス。
     function updateBackfill() {
         if (!currentPost || !currentImageData) return;
@@ -367,7 +376,8 @@
             }, {
                 marginPx: getBackfillMarginPx(),
                 frontDispLimit: getBackfillFrontClamp(),
-                maxDepthFactor: getBackfillFarClamp()
+                maxDepthFactor: getBackfillFarClamp(),
+                farPriorityPx: getBackfillFarPriorityPx()
             });
         }
         Viewer.setBackfillLayer(currentBackfill);
@@ -553,6 +563,10 @@
             updateBackfillClampLabels();
         });
         $('backfillFarClamp').addEventListener('change', updateBackfill);
+        $('backfillFarPriority').addEventListener('input', (e) => {
+            updateBackfillFarPriorityLabel();
+        });
+        $('backfillFarPriority').addEventListener('change', updateBackfill);
         $('recompute').addEventListener('click', () => {
             // モデル変更 or num_tokens が変わっていれば再推論、そうでなければ後処理のみ
             if ((!modelReady || getNumTokens() !== lastNumTokens) && currentImageData) {
@@ -608,6 +622,7 @@
         updateFillMarginLabel();
         updateBackfillParallaxCutLabel();
         updateBackfillClampLabels();
+        updateBackfillFarPriorityLabel();
         Viewer.setBackfillParallaxCutK(getBackfillParallaxCutK());
         [
             'depthUpsampleEnable',

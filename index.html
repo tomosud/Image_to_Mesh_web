@@ -201,6 +201,12 @@
                             <input type="range" id="backfillFarClamp" min="1.00" max="16.00" step="0.25" value="4.00">
                         </div>
                     </div>
+                    <div class="control-group">
+                        <label>Backfill Far Priority (px): <span id="backfillFarPriorityValue">12</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="How far a deeper backfill label can locally override a nearer label after nearest-edge BFS. Higher values suppress foreground-depth streaks more, but can pull wider regions toward farther surfaces. Set 0 to disable." aria-label="Backfill Far Priority help">?</span></label>
+                        <div class="slider-container">
+                            <input type="range" id="backfillFarPriority" min="0" max="48" step="1" value="12">
+                        </div>
+                    </div>
                 </details>
                 <div class="control-group dl-group">
                     <div class="dl-title">Downloads</div>
@@ -264,10 +270,10 @@
     <script src="js/colorpatch.js?v=20260705-2"></script>
     <script src="js/worldpos.js?v=20260620-13"></script>
     <script src="js/normalmap.js?v=20260620-13"></script>
-    <script src="js/backfill.js?v=20260705-6"></script>
+    <script src="js/backfill.js?v=20260705-8"></script>
     <script src="js/viewer.js?v=20260705-18"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260705-1"></script>
-    <script src="js/main.js?v=20260705-13"></script>
+    <script src="js/main.js?v=20260705-14"></script>
 </body>
 </html>

@@ -37,7 +37,7 @@ const Backfill = (function () {
     // メイン処理
     // input: { depth: Float32[H*W](metric), validMask: Uint8(切断後有効), holeMask: Uint8(エッジ切断で消えた画素),
     //          intrinsics: {fx,fy,cx,cy}(正規化), color: ImageData(元解像度), width, height }
-    // opts: { marginPx, jumpTol, frontDispLimit, maxDepthFactor }
+    // opts: { marginPx, jumpTol, frontDispLimit, maxDepthFactor, farPriorityPx }
     // 戻り値: { worldPos: Float32[H*W*4], colorTex, validMask: Uint8, width, height, stats } | null
     function generate(input, opts) {
         const { depth, validMask, holeMask, intrinsics, width: W, height: H } = input;
@@ -51,6 +51,7 @@ const Backfill = (function () {
         const PUSH_BASE = 0.015;  // 層全体の基礎押し込み（z-fighting とクラック回避）
         const PUSH_BACK = 0.04;   // 種から離れるほど追加で奥へ押し込む最大比率
         const RAMP_PX = 12;       // PUSH_BACK がフルに効くまでの距離
+        const farPriorityPx = Math.max(0, Math.floor((opts && opts.farPriorityPx) ?? 12));
         const N = W * H;
 
         // ---- 1a. 種の検出: 有効画素同士の深度不連続エッジの「奥側」画素 ----
@@ -283,6 +284,45 @@ const Backfill = (function () {
         const synthList = [];
         for (let i = 0; i < N; i++) if (synth[i]) synthList.push(i);
 
+        // ---- 2b. 局所的な奥側優先 ----
+        // 多源 BFS は最寄り seed が勝つため、手前寄りの seed が細い帯として奥穴へ伸びることがある。
+        // ただし全体を最奥1枚に吸わせると別の破綻になる。そこで「近傍から届く、明確に奥の
+        // label」だけが最大 farPriorityPx ぶん割り当てを奪えるようにする。
+        // 1 pass = 1px の同時更新なので、奥優先は局所に留まり、遠方の最奥面は全域へ届かない。
+        let farPriorityOverrides = 0;
+        {
+            const passes = Math.min(farPriorityPx, marginPx);
+            for (let p = 0; p < passes; p++) {
+                const changed = [];
+                const sources = [];
+                for (const i of synthList) {
+                    const x = i % W, y = (i / W) | 0;
+                    let best = bgDisp[i], bj = -1;
+                    for (const [dx, dy] of OFFS) {
+                        const nx = x + dx, ny = y + dy;
+                        if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                        const j = ny * W + nx;
+                        if (!seed[j] && !synth[j]) continue;
+                        // disparity が小さいほど奥。jumpTol 未満の差は同じ面の揺れとして無視する。
+                        if (bgDisp[j] < best / (1 + jumpTol)) { best = bgDisp[j]; bj = j; }
+                    }
+                    if (bj >= 0) { changed.push(i); sources.push(bj); }
+                }
+                if (!changed.length) break;
+                for (let k = 0; k < changed.length; k++) {
+                    const i = changed[k], j = sources[k];
+                    if (!(bgDisp[j] < bgDisp[i] / (1 + jumpTol))) continue;
+                    bgDisp[i] = bgDisp[j];
+                    label[i] = label[j];
+                    colorF[i * 3] = colorF[j * 3];
+                    colorF[i * 3 + 1] = colorF[j * 3 + 1];
+                    colorF[i * 3 + 2] = colorF[j * 3 + 2];
+                    dist[i] = Math.min(marginPx, Math.max(0, dist[j]) + 1);
+                    farPriorityOverrides++;
+                }
+            }
+        }
+
         // ---- 2c. 残り穴を最寄りリムで閉じる（黒穴を消す・奥へ出さない）----
         // BFS の margin 外に残った holeMask 画素が黒く残ると視差で穴が見える。層(synth∪seed)
         // から holeMask 内へ「最も手前(=最大 disparity)のリム値」を伝播して閉じる。最寄りリムを
@@ -426,7 +466,16 @@ const Backfill = (function () {
         const wp = WorldPos.fromCameraPoints(camPoints, W, H, layerMask, { scale: 1.0, applyMask: true });
 
         const stats = { seeds: seedCount, filledPx };
-        console.log('[Backfill]', { ...stats, marginPx, jumpTol, frontDispLimit, maxDepthFactor, size: `${W}x${H}` });
+        console.log('[Backfill]', {
+            ...stats,
+            marginPx,
+            jumpTol,
+            frontDispLimit,
+            maxDepthFactor,
+            farPriorityPx,
+            farPriorityOverrides,
+            size: `${W}x${H}`
+        });
         return {
             worldPos: wp.data,
             colorTex: { data: colorOut, width: W, height: H },

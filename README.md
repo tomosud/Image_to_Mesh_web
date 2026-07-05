@@ -152,6 +152,7 @@ Backfill creates a second background layer behind depth-edge silhouettes.
 - Higher values keep more backfill connected; lower values cut foreground-facing smears more aggressively
 - **Backfill Front Clamp** limits generated disparity relative to the assigned background edge, default `1.00x`
 - **Backfill Far Clamp** limits generated depth relative to the assigned background edge, default `4.0x`
+- **Backfill Far Priority** lets deeper labels locally override nearer labels after BFS, default `12px`; set `0` to disable
 
 ### Small Component Faces
 
