@@ -99,7 +99,9 @@ Use the radius and sigma controls to balance RGB edge alignment against texture-
 
 ### Edge Threshold
 
-Controls detection of sharp depth discontinuities. Instead of deleting geometry, the soft ramp pixels around each detected edge are snapped to the surfaces on both sides (removing in-between depth values and colors), and the mesh is split at the edge. Both sides extend one cell across the seam, so no hole opens in the front view.
+Controls EdgeSnap detection of sharp depth discontinuities. The implementation compares horizontal and vertical neighboring depth samples; if their relative depth jump is above this value, both pixels are marked for snapping.
+
+Marked pixels are not deleted. Stable neighboring depth areas propagate into the marked pixels, so in-between ramp values are replaced by the nearest near/far surface in log-depth space. The viewer also enables mesh seam splitting while Edge Threshold is not `Off`; the actual face-splitting test uses a fixed `0.10` relative depth jump.
 
 - Range: `0.005`–`1.000`
 - Default: `0.045`
@@ -113,11 +115,12 @@ If surfaces that belong together get split apart, raise the value. If long stret
 
 ### Snap Width
 
-Maximum width (in pixels) of the soft depth ramp that is snapped to the neighboring surfaces at a depth edge.
+Maximum number of EdgeSnap propagation passes from stable depth areas into marked edge pixels.
 
 - Range: `1`–`32`
 - Default: `4`
-- Increase if wide or blurred edges still leave stretched geometry
+- Increase if thick detected ramps still leave in-between depth values
+- Pixels not reached within this limit keep their original depth
 
 ### Sky / Masked Area
 

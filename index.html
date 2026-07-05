@@ -160,17 +160,18 @@
                     <input type="number" id="depthInvalidValue" value="-1" step="0.1">
                 </div>
                 <div class="control-group">
-                    <label>Edge Threshold: <span id="edgeThresholdValue">0.045</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Detects sudden depth changes. Ramp pixels around each edge are snapped to the near/far surface (no geometry is deleted) and the mesh is split there. Lower values detect more edges. Off disables edge snapping and splitting." aria-label="Edge Threshold help">?</span></label>
+                    <label>Edge Threshold: <span id="edgeThresholdValue">0.045</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Relative depth jump threshold for EdgeSnap detection." aria-label="Edge Threshold help">?</span></label>
                     <div class="slider-container">
                         <input type="range" id="edgeThreshold" min="0.005" max="1.000" step="0.005" value="0.045">
                     </div>
-                    <div class="control-help">Smaller values detect more edges. Set 1.000 to disable edge snapping and splitting.</div>
+                    <div class="control-help">Compares horizontal/vertical neighbor pairs. If their relative depth jump is above this value, both pixels are marked for snapping. Smaller values mark more edges. Set 1.000 to disable EdgeSnap and mesh seam splitting.</div>
                 </div>
                 <div class="control-group">
-                    <label>Snap Width (px): <span id="snapWidthValue">4</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Maximum width of the soft depth ramp that is snapped to the surfaces on each side of a depth edge. Increase if wide/blurred edges still leave stretched geometry." aria-label="Snap Width help">?</span></label>
+                    <label>Snap Width (px): <span id="snapWidthValue">4</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Maximum EdgeSnap propagation passes from stable depth areas." aria-label="Snap Width help">?</span></label>
                     <div class="slider-container">
                         <input type="range" id="snapWidth" min="1" max="32" step="1" value="4">
                     </div>
+                    <div class="control-help">Each pass lets a stable near/far depth area claim adjacent marked edge pixels. Higher values can clean thicker detected ramps; pixels not reached within this limit keep their original depth.</div>
                 </div>
                 <div class="control-group">
                     <label>Sky / Masked Area <span class="help-tip" tabindex="0" role="note" data-tooltip="MoGe-2 marks sky and uncertain regions as invalid. Sky Backdrop keeps those pixels and places them on a flat plane far behind the scene (2x the deepest valid point, at least 100m). Apply Mask OFF trusts the model's raw depth there instead. Apply Mask ON removes those regions, leaving holes." aria-label="Sky / Masked Area help">?</span></label>
