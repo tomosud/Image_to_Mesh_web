@@ -34,89 +34,6 @@ const Backfill = (function () {
         return out;
     }
 
-    // 種画素の色のみを起点にしたプルプッシュ（画像ピラミッド）。全画素の補完色を返す。
-    function pullPush(W, H, seedMask, colorBase) {
-        // 各レベル: [r,g,b] 正規化済み + valid。level0 から 2x2 平均で縮小。
-        const levels = [];
-        let lw = W, lh = H;
-        let data = new Float32Array(W * H * 3);
-        let valid = new Uint8Array(W * H);
-        for (let i = 0; i < W * H; i++) {
-            if (!seedMask[i]) continue;
-            valid[i] = 1;
-            data[i * 3] = colorBase[i * 4];
-            data[i * 3 + 1] = colorBase[i * 4 + 1];
-            data[i * 3 + 2] = colorBase[i * 4 + 2];
-        }
-        levels.push({ w: lw, h: lh, data, valid });
-
-        while (lw > 2 || lh > 2) {
-            const nw = Math.max(1, lw >> 1), nh = Math.max(1, lh >> 1);
-            const nd = new Float32Array(nw * nh * 3);
-            const nv = new Uint8Array(nw * nh);
-            for (let y = 0; y < nh; y++) {
-                for (let x = 0; x < nw; x++) {
-                    let r = 0, g = 0, b = 0, wsum = 0;
-                    for (let dy = 0; dy < 2; dy++) {
-                        for (let dx = 0; dx < 2; dx++) {
-                            const sx = Math.min(lw - 1, x * 2 + dx);
-                            const sy = Math.min(lh - 1, y * 2 + dy);
-                            const si = sy * lw + sx;
-                            if (!valid[si]) continue;
-                            r += data[si * 3]; g += data[si * 3 + 1]; b += data[si * 3 + 2];
-                            wsum++;
-                        }
-                    }
-                    const ni = y * nw + x;
-                    if (wsum > 0) {
-                        nv[ni] = 1;
-                        nd[ni * 3] = r / wsum; nd[ni * 3 + 1] = g / wsum; nd[ni * 3 + 2] = b / wsum;
-                    }
-                }
-            }
-            levels.push({ w: nw, h: nh, data: nd, valid: nv });
-            lw = nw; lh = nh; data = nd; valid = nv;
-        }
-
-        // 最粗レベル: 無効画素は有効平均で埋める
-        const top = levels[levels.length - 1];
-        let ar = 0, ag = 0, ab = 0, an = 0;
-        for (let i = 0; i < top.w * top.h; i++) {
-            if (!top.valid[i]) continue;
-            ar += top.data[i * 3]; ag += top.data[i * 3 + 1]; ab += top.data[i * 3 + 2]; an++;
-        }
-        if (an === 0) return null;
-        for (let i = 0; i < top.w * top.h; i++) {
-            if (top.valid[i]) continue;
-            top.data[i * 3] = ar / an; top.data[i * 3 + 1] = ag / an; top.data[i * 3 + 2] = ab / an;
-        }
-
-        // 粗→細: 無効画素を1段粗いレベル（全埋め済み）からバイリニアで補完
-        for (let L = levels.length - 2; L >= 0; L--) {
-            const fine = levels[L], coarse = levels[L + 1];
-            for (let y = 0; y < fine.h; y++) {
-                const fy = (y + 0.5) * coarse.h / fine.h - 0.5;
-                const y0 = Math.max(0, Math.floor(fy)), y1 = Math.min(coarse.h - 1, y0 + 1);
-                const wy = fy - y0;
-                for (let x = 0; x < fine.w; x++) {
-                    const fi = y * fine.w + x;
-                    if (fine.valid[fi]) continue;
-                    const fx = (x + 0.5) * coarse.w / fine.w - 0.5;
-                    const x0 = Math.max(0, Math.floor(fx)), x1 = Math.min(coarse.w - 1, x0 + 1);
-                    const wx = fx - x0;
-                    const i00 = (y0 * coarse.w + x0) * 3, i10 = (y0 * coarse.w + x1) * 3;
-                    const i01 = (y1 * coarse.w + x0) * 3, i11 = (y1 * coarse.w + x1) * 3;
-                    for (let c = 0; c < 3; c++) {
-                        const v0 = coarse.data[i00 + c] * (1 - wx) + coarse.data[i10 + c] * wx;
-                        const v1 = coarse.data[i01 + c] * (1 - wx) + coarse.data[i11 + c] * wx;
-                        fine.data[fi * 3 + c] = v0 * (1 - wy) + v1 * wy;
-                    }
-                }
-            }
-        }
-        return levels[0].data;
-    }
-
     // メイン処理
     // input: { depth: Float32[H*W](metric), validMask: Uint8(切断後有効), holeMask: Uint8(エッジ切断で消えた画素),
     //          intrinsics: {fx,fy,cx,cy}(正規化), color: ImageData(元解像度), width, height }
@@ -158,7 +75,10 @@ const Backfill = (function () {
         }
 
         // ---- 1b. 種の追加: エッジ切断で消えた画素（穴）の奥側境界 ----
-        // 穴の連結成分ごとに境界有効画素を near/far 分類（幾何平均しきい値）し、far を種に加える。
+        // 穴の連結成分ごとに境界有効画素を分類し、最も手前（=前景）の帯より奥の
+        // 画素をすべて種に加える。幾何平均しきい値だと中景の奥面が落ちて最奥1枚に
+        // 吸着したため、「最寄り帯(dmin)より jumpTol 以上奥」を全部種にする。前景帯
+        // だけ除外するので手前へ突き出さず、複数の背景面がそれぞれラベル付けされる。
         const hlabel = new Int32Array(N).fill(-1);
         const queue = new Int32Array(N);
         {
@@ -185,9 +105,9 @@ const Backfill = (function () {
                 let dmin = Infinity, dmax = 0;
                 for (const j of ringSet) { const d = depth[j]; if (d < dmin) dmin = d; if (d > dmax) dmax = d; }
                 if (!(dmax / dmin >= 1 + jumpTol)) continue;
-                const t = Math.sqrt(dmin * dmax);
+                const t = dmin * (1 + jumpTol);   // 前景帯の上限。これより奥を全部種に
                 for (const j of ringSet) {
-                    if (depth[j] >= t && !seed[j]) { seed[j] = 1; seedCount++; }
+                    if (depth[j] > t && !seed[j]) { seed[j] = 1; seedCount++; }
                 }
             }
         }
@@ -224,15 +144,111 @@ const Backfill = (function () {
             }
         }
 
-        // ---- 2. 種からマージン付き BFS ----
-        // 種の背景 disparity を伝播し、「背景より明確に手前の画素」と「穴画素」にのみ潜り込む。
-        // これで背景面そのものには広がらず、前景シルエットの裏側だけが生成対象になる。
+        // ---- 1d. 種を背景面ごとにラベル分け ----
+        // 4近傍の種を disparity(=1/depth) 比が近いもの同士で連結成分にまとめる。
+        // 前景を挟んで分かれた背景（例: 空 vs 建物）は互いに非隣接なので別ラベルに
+        // なり、各ラベルが独立に裏へ延長される（＝各奥側エッジからの延長）。
+        // これにより「最奥1枚へ吸着」ではなく「各奥側の面をそれぞれ伸ばす」になる。
+        const label = new Int32Array(N).fill(-1);
+        {
+            let lab = 0;
+            for (let s = 0; s < N; s++) {
+                if (!seed[s] || label[s] >= 0) continue;
+                let head = 0, tail = 0;
+                queue[tail++] = s; label[s] = lab;
+                while (head < tail) {
+                    const i = queue[head++];
+                    const x = i % W, y = (i / W) | 0;
+                    const di = 1 / depth[i];
+                    for (const [dx, dy] of OFFS) {
+                        const nx = x + dx, ny = y + dy;
+                        if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                        const j = ny * W + nx;
+                        if (!seed[j] || label[j] >= 0) continue;
+                        const dj = 1 / depth[j];
+                        const hi = Math.max(di, dj), lo = Math.min(di, dj);
+                        if (hi > lo * (1 + jumpTol)) continue;  // 段差は別背景面
+                        label[j] = lab; queue[tail++] = j;
+                    }
+                }
+                lab++;
+            }
+        }
+
+        // 色の基準（元解像度→モデル解像度）。BFS での種色伝播に使う。
+        const colorBase = resampleColor(input.color, W, H);
+
+        // ---- 1e. 種の depth/色をロバスト化（突出画素・混色・縞の無視）----
+        // エッジ直上の種は、前景との混色や EdgeSnap で吸着し切れなかった中間段差
+        // （＝背景の台地より手前に突出した薄い帯）を含みやすい。これらは段差で別ラベルに
+        // なり、前景に隣接するため BFS で勝ってしまい、手前へ伸びる・縞になる原因になる。
+        // 各種の近傍窓で「最も奥の台地」を推定し、その台地の深度・色に置き換える:
+        //   1. 窓内の有効画素の disparity から far 側(10%ile)を台地の目安 dfar とする
+        //   2. dfar 近傍（disp <= dfar*(1+jumpTol)）＝台地の帯だけを集める
+        //      → これで前景・突出画素・別の手前面（大 disparity）は自動的に除外される
+        //   3. 帯の disparity 中央値を深度ターゲット、帯の色中央値を色にする
+        // 近くに台地が無い（本当に手前の孤立背景）場合は帯＝自分自身になり元の値を保つ。
+        // 種の描画ジオメトリ（節6）は主メッシュ接続のため元 depth のまま。ここでの値は
+        // 「延長のターゲット深度・色」としてのみ使う。
+        const ROBUST_R = 4;               // 近傍窓の半径(px)
+        const ROBUST_FAR_Q = 0.10;        // 台地 disparity の目安に使う far 側パーセンタイル
+        const seedDispRobust = new Float32Array(N);
+        const seedColRobust = new Float32Array(N * 3);
+        {
+            const da = [], ra = [], ga = [], ba = [];
+            const median = (arr) => { const t = arr.slice().sort((a, b) => a - b); return t[t.length >> 1]; };
+            for (let s = 0; s < N; s++) {
+                if (!seed[s]) continue;
+                const sx = s % W, sy = (s / W) | 0;
+                da.length = ra.length = ga.length = ba.length = 0;
+                for (let dy = -ROBUST_R; dy <= ROBUST_R; dy++) {
+                    const ny = sy + dy; if (ny < 0 || ny >= H) continue;
+                    for (let dx = -ROBUST_R; dx <= ROBUST_R; dx++) {
+                        const nx = sx + dx; if (nx < 0 || nx >= W) continue;
+                        const j = ny * W + nx;
+                        if (!validMask[j]) continue;              // 穴は対象外
+                        da.push(1 / depth[j]);
+                        ra.push(colorBase[j * 4]); ga.push(colorBase[j * 4 + 1]); ba.push(colorBase[j * 4 + 2]);
+                    }
+                }
+                if (da.length === 0) {
+                    seedDispRobust[s] = 1 / depth[s];
+                    seedColRobust[s * 3] = colorBase[s * 4];
+                    seedColRobust[s * 3 + 1] = colorBase[s * 4 + 1];
+                    seedColRobust[s * 3 + 2] = colorBase[s * 4 + 2];
+                    continue;
+                }
+                const sorted = da.slice().sort((a, b) => a - b);
+                const dfar = sorted[Math.floor(sorted.length * ROBUST_FAR_Q)];
+                const thr = dfar * (1 + jumpTol);            // 台地の帯（前景・突出画素を除外）
+                const bd = [], br = [], bg = [], bb = [];
+                for (let k = 0; k < da.length; k++) {
+                    if (da[k] <= thr) { bd.push(da[k]); br.push(ra[k]); bg.push(ga[k]); bb.push(ba[k]); }
+                }
+                seedDispRobust[s] = median(bd);
+                seedColRobust[s * 3] = median(br);
+                seedColRobust[s * 3 + 1] = median(bg);
+                seedColRobust[s * 3 + 2] = median(bb);
+            }
+        }
+
+        // ---- 2. 種からマージン付き BFS（最寄り奥側エッジの延長を割り当て）----
+        // 多源 BFS で各種から disparity・ラベル・色を同時に伝播する。各穴/前景画素は
+        // 「最も近い奥側エッジ」に割り当てられ、その背景面の等深度延長になる。前景を
+        // 挟んだ反対側の背景とは別ラベルなので、深度も色も混ざらない。
         const synth = new Uint8Array(N);
         const dist = new Int32Array(N).fill(-1);
         const bgDisp = new Float32Array(N);
+        const colorF = new Float32Array(N * 3);
         let head = 0, tail = 0, filledPx = 0;
         for (let i = 0; i < N; i++) {
-            if (seed[i]) { dist[i] = 0; bgDisp[i] = 1 / depth[i]; queue[tail++] = i; }
+            if (!seed[i]) continue;
+            dist[i] = 0;
+            bgDisp[i] = seedDispRobust[i];       // 突出画素を無視した台地深度をターゲットに
+            colorF[i * 3] = seedColRobust[i * 3];
+            colorF[i * 3 + 1] = seedColRobust[i * 3 + 1];
+            colorF[i * 3 + 2] = seedColRobust[i * 3 + 2];
+            queue[tail++] = i;
         }
         while (head < tail) {
             const i = queue[head++];
@@ -249,6 +265,10 @@ const Backfill = (function () {
                 if (!isHole && !isForeground) continue;
                 dist[j] = dist[i] + 1;
                 bgDisp[j] = bgDisp[i];
+                label[j] = label[i];
+                colorF[j * 3] = colorF[i * 3];
+                colorF[j * 3 + 1] = colorF[i * 3 + 1];
+                colorF[j * 3 + 2] = colorF[i * 3 + 2];
                 synth[j] = 1;
                 filledPx++;
                 queue[tail++] = j;
@@ -261,38 +281,14 @@ const Backfill = (function () {
         const synthList = [];
         for (let i = 0; i < N; i++) if (synth[i]) synthList.push(i);
 
-        // ---- 2b. 奥側優先の深化 ----
-        // bgDisp を領域内で min 拡散（Jacobi、1パス=1px）し、内部の目標深度を
-        // 「最寄りの種」ではなく「近傍で最も奥の種」へ寄せる。手前の中景（茂み等）の
-        // 種に引っ張られて生成面が前へ突き出すのを抑える。
-        const DEEPEN_PASSES = 12;
-        for (let p = 0; p < DEEPEN_PASSES; p++) {
-            const prev = bgDisp.slice();
-            let changed = false;
-            for (const i of synthList) {
-                const x = i % W, y = (i / W) | 0;
-                let m = prev[i];
-                for (const [dx, dy] of OFFS) {
-                    const nx = x + dx, ny = y + dy;
-                    if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
-                    const j = ny * W + nx;
-                    if (!synth[j] && !seed[j]) continue;
-                    if (prev[j] < m) m = prev[j];
-                }
-                if (m < bgDisp[i]) { bgDisp[i] = m; changed = true; }
-            }
-            if (!changed) break;
-        }
-
-        // ---- 3. 深度の伸長 ----
-        // 初期値 = 深化済み bgDisp（=近傍で最も奥のエッジの等深度延長）。
-        // 種を Dirichlet とする Gauss-Seidel で滑らかに繋ぎ、各画素は反復内で
-        // 「目標より手前に出ない・種の4倍より奥へ行かない」ようクランプする。
-        // 平面フィトは廃止: 生成領域が繋がって1成分になると、深度の異なる種
-        // （壁・机・天井）に1枚の平面が張られ、場所により手前へ飛び出すため。
+        // ---- 3. 深度の伸長（同一ラベル内のみ平滑化）----
+        // 初期値 = BFS で割り当てた最寄り奥側エッジの disparity（等深度延長）。
+        // 同じラベル（同じ背景面）の隣接のみで Gauss-Seidel 平滑化し、別背景面とは
+        // 繋がない。これにより深度の異なる背景を跨ぐ「膜」が張られない。各画素は反復
+        // 内で「割り当てエッジより手前に出ない・種の4倍より奥へ行かない」でクランプ。
         const disp = new Float32Array(N);
         for (let i = 0; i < N; i++) {
-            if (seed[i]) { disp[i] = 1 / depth[i]; continue; }
+            if (seed[i]) { disp[i] = seedDispRobust[i]; continue; }  // Dirichlet も台地深度
             if (synth[i]) disp[i] = bgDisp[i];
         }
         for (let it = 0; it < 40; it++) {
@@ -306,11 +302,12 @@ const Backfill = (function () {
                     if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                     const j = ny * W + nx;
                     if (!synth[j] && !seed[j]) continue;
+                    if (label[j] !== label[i]) continue;           // 別背景面とは混ぜない
                     sum += disp[j]; cnt++;
                 }
                 if (cnt === 0) continue;
                 let v = sum / cnt;
-                if (v > bgDisp[i]) v = bgDisp[i];              // 奥側エッジより手前に出さない
+                if (v > bgDisp[i]) v = bgDisp[i];              // 割り当てエッジより手前に出さない
                 const minDisp = bgDisp[i] * 0.25;
                 if (v < minDisp) v = minDisp;                  // 外挿の暴走防止（種の4倍まで）
                 disp[i] = v;
@@ -324,18 +321,11 @@ const Backfill = (function () {
             depthOut[i] = (1 / disp[i]) * (1 + PUSH_BASE + PUSH_BACK * t);
         }
 
-        // ---- 5. 色の伸長: プルプッシュ + 拡散平滑化 ----
-        const colorBase = resampleColor(input.color, W, H);
-        const filled = pullPush(W, H, seed, colorBase);
-        if (!filled) return null;
-        const colorF = new Float32Array(N * 3);
-        for (let i = 0; i < N; i++) {
-            const src = synth[i] ? filled : null;
-            colorF[i * 3] = src ? src[i * 3] : colorBase[i * 4];
-            colorF[i * 3 + 1] = src ? src[i * 3 + 1] : colorBase[i * 4 + 1];
-            colorF[i * 3 + 2] = src ? src[i * 3 + 2] : colorBase[i * 4 + 2];
-        }
-        for (let it = 0; it < 3; it++) {
+        // ---- 5. 色の伸長（同一ラベル内のみ平滑化）----
+        // 初期値 = BFS で伝播した最寄り奥側エッジの中央値色（1e）。等深度延長は種色を
+        // 延長方向へ平行に敷くため、高周波エッジでは縞に見える。同一ラベル内で反復
+        // 平滑化して延長方向と直交にブレンドし、縞を緩和する（別ラベルとは混ぜない）。
+        for (let it = 0; it < 12; it++) {
             for (const i of synthList) {
                 const x = i % W, y = (i / W) | 0;
                 let r = 0, g = 0, b = 0, cnt = 0;
@@ -344,6 +334,7 @@ const Backfill = (function () {
                     if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                     const j = ny * W + nx;
                     if (!synth[j] && !seed[j]) continue;
+                    if (label[j] !== label[i]) continue;
                     r += colorF[j * 3]; g += colorF[j * 3 + 1]; b += colorF[j * 3 + 2]; cnt++;
                 }
                 if (cnt > 0) { colorF[i * 3] = r / cnt; colorF[i * 3 + 1] = g / cnt; colorF[i * 3 + 2] = b / cnt; }
@@ -354,11 +345,15 @@ const Backfill = (function () {
         const colorOut = new Uint8Array(N * 4);
         const layerMask = new Uint8Array(N);
         for (let i = 0; i < N; i++) {
-            colorOut[i * 4] = Math.max(0, Math.min(255, Math.round(colorF[i * 3])));
-            colorOut[i * 4 + 1] = Math.max(0, Math.min(255, Math.round(colorF[i * 3 + 1])));
-            colorOut[i * 4 + 2] = Math.max(0, Math.min(255, Math.round(colorF[i * 3 + 2])));
-            layerMask[i] = (synth[i] || seed[i]) ? 1 : 0;
-            colorOut[i * 4 + 3] = layerMask[i] ? 255 : 0;
+            const isLayer = (synth[i] || seed[i]) ? 1 : 0;
+            const r = isLayer ? colorF[i * 3] : colorBase[i * 4];
+            const g = isLayer ? colorF[i * 3 + 1] : colorBase[i * 4 + 1];
+            const b = isLayer ? colorF[i * 3 + 2] : colorBase[i * 4 + 2];
+            colorOut[i * 4] = Math.max(0, Math.min(255, Math.round(r)));
+            colorOut[i * 4 + 1] = Math.max(0, Math.min(255, Math.round(g)));
+            colorOut[i * 4 + 2] = Math.max(0, Math.min(255, Math.round(b)));
+            layerMask[i] = isLayer;
+            colorOut[i * 4 + 3] = isLayer ? 255 : 0;
         }
 
         // ---- 6. world position 化(既存パスを流用) ----

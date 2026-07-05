@@ -289,8 +289,10 @@ const Viewer = (function () {
             uvs[i * 2 + 1] = 1 - (((i / W) | 0) + 0.5) / H;
         }
         geometry.attributes.position.needsUpdate = true;
-        // 生成面は構成上滑らかなので深度段差の除去は不要。NaN 面のみ除去。
-        removeInvalidAndDiscontinuousFaces(geometry, positions, false);
+        // 生成レイヤーは背景面ごとにラベル分けされ、隣接ラベル間には深度段差が残る
+        // （空 vs 建物 など）。その段差を面で繋ぐと手前へ伸びるリボンになるため、
+        // NaN 面に加えて深度段差セルも除去する（段差は主メッシュの裏に隠れる）。
+        removeInvalidAndDiscontinuousFaces(geometry, positions, true);
         if (!geometry.index || geometry.index.count === 0) { geometry.dispose(); return; }
         updateFiniteGeometryBounds(geometry, positions);
         geometry.computeVertexNormals();
