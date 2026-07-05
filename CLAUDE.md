@@ -27,14 +27,3 @@
   書いて PASS を確認する。実画像での見た目の確認はユーザーのブラウザテストに委ねる。
 - **js を変更したら `index.html` のキャッシュバスター（`?v=YYYYMMDD-N`）を更新する。**
 
-## しきい値の役割分担（退行防止・重要）
-
-過去に連動させて退行した実績があるため、以下は**互いに連動させない**:
-
-| 処理 | しきい値 |
-|---|---|
-| EdgeSnap のエッジ検出（`js/edgesnap.js`） | Edge Threshold UI（これだけが UI 連動） |
-| シーム分割 / 面カット（`js/viewer.js`） | 0.10 固定 |
-| backfill の種検出 jumpTol（`js/backfill.js`） | 0.10 固定 |
-
-詳細は `PLAN_INPAINT.md` の「EdgeSnap 実験のロールバック」の教訓を参照。
