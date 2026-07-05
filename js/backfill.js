@@ -281,6 +281,48 @@ const Backfill = (function () {
         const synthList = [];
         for (let i = 0; i < N; i++) if (synth[i]) synthList.push(i);
 
+        // ---- 2c. 残り穴を最寄りリムで閉じる（黒穴を消す・奥へ出さない）----
+        // BFS の margin 外に残った holeMask 画素が黒く残ると視差で穴が見える。層(synth∪seed)
+        // から holeMask 内へ「最も手前(=最大 disparity)のリム値」を伝播して閉じる。最寄りリムを
+        // 採るので埋めた面が周囲より奥へ突き出さない。ラベル・色もそのリムから引き継ぐ。
+        // 各画素は反復で「より手前のリム」が届けば更新する（単調増加＝収束）。
+        {
+            const closeList = [];
+            for (let i = 0; i < N; i++) if (holeMask[i] && !seed[i] && !synth[i]) closeList.push(i);
+            if (closeList.length) {
+                const CLOSE_PASSES = 64;   // 穴を閉じる最大伝播距離(px)。超える巨大穴の芯は黒のまま
+                for (let p = 0; p < CLOSE_PASSES; p++) {
+                    let changed = false;
+                    for (const i of closeList) {
+                        const x = i % W, y = (i / W) | 0;
+                        let best = -1, bj = -1;
+                        for (const [dx, dy] of OFFS) {
+                            const nx = x + dx, ny = y + dy;
+                            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                            const j = ny * W + nx;
+                            if (!(synth[j] || seed[j])) continue;
+                            if (bgDisp[j] > best) { best = bgDisp[j]; bj = j; }
+                        }
+                        if (bj < 0) continue;
+                        const cur = synth[i] ? bgDisp[i] : -1;
+                        if (best > cur) {
+                            synth[i] = 1;
+                            bgDisp[i] = best;
+                            label[i] = label[bj];
+                            colorF[i * 3] = colorF[bj * 3];
+                            colorF[i * 3 + 1] = colorF[bj * 3 + 1];
+                            colorF[i * 3 + 2] = colorF[bj * 3 + 2];
+                            dist[i] = RAMP_PX;   // 裏当てとして PUSH_BACK フル
+                            changed = true;
+                        }
+                    }
+                    if (!changed) break;
+                }
+                synthList.length = 0;
+                for (let i = 0; i < N; i++) if (synth[i]) synthList.push(i);
+            }
+        }
+
         // ---- 3. 深度の伸長（同一ラベル内のみ平滑化）----
         // 初期値 = BFS で割り当てた最寄り奥側エッジの disparity（等深度延長）。
         // 同じラベル（同じ背景面）の隣接のみで Gauss-Seidel 平滑化し、別背景面とは
@@ -321,27 +363,31 @@ const Backfill = (function () {
             depthOut[i] = (1 / disp[i]) * (1 + PUSH_BASE + PUSH_BACK * t);
         }
 
-        // ---- 5. 色の伸長（同一ラベル内のみ平滑化）----
-        // 初期値 = BFS で伝播した最寄り奥側エッジの中央値色（1e）。等深度延長は種色を
-        // 延長方向へ平行に敷くため、高周波エッジでは縞に見える。同一ラベル内で反復平滑化
-        // して縞を潰す。8近傍＋多パスで急速に拡散させる（別ラベルとは混ぜない）。
-        // 縞が残るなら COLOR_SMOOTH_PASSES を増やす。完全な除去は将来 inpainting で対応。
-        const COLOR_SMOOTH_PASSES = 40;
+        // ---- 5. 色の伸長（同一ラベル内・多スケールで徐々に拡散）----
+        // 初期値 = BFS で伝播した最寄り奥側エッジの中央値色（1e）。等深度延長は種色を延長
+        // 方向へ平行に敷くため高周波エッジでは縞に見える。間隔を 16,8,4,2,1 と変える à-trous
+        // 平滑化で「徐々に広がる」拡散をかけ、少ないパスで遠方まで均して縞を溶かす（別ラベル
+        // とは混ぜない）。粗いスケールほど広く、細かいスケールで局所を整える。
+        // 縞が残るなら ATROUS_PASSES を増やす。完全な除去は将来 inpainting で対応。
+        const ATROUS_SCALES = [16, 8, 4, 2, 1];
+        const ATROUS_PASSES = 3;
         const OFFS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-        for (let it = 0; it < COLOR_SMOOTH_PASSES; it++) {
-            for (const i of synthList) {
-                const x = i % W, y = (i / W) | 0;
-                const li = label[i];
-                let r = 0, g = 0, b = 0, cnt = 0;
-                for (const [dx, dy] of OFFS8) {
-                    const nx = x + dx, ny = y + dy;
-                    if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
-                    const j = ny * W + nx;
-                    if (!synth[j] && !seed[j]) continue;
-                    if (label[j] !== li) continue;
-                    r += colorF[j * 3]; g += colorF[j * 3 + 1]; b += colorF[j * 3 + 2]; cnt++;
+        for (const s of ATROUS_SCALES) {
+            for (let it = 0; it < ATROUS_PASSES; it++) {
+                for (const i of synthList) {
+                    const x = i % W, y = (i / W) | 0;
+                    const li = label[i];
+                    let r = colorF[i * 3], g = colorF[i * 3 + 1], b = colorF[i * 3 + 2], cnt = 1;
+                    for (const [dx, dy] of OFFS8) {
+                        const nx = x + dx * s, ny = y + dy * s;
+                        if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                        const j = ny * W + nx;
+                        if (!synth[j] && !seed[j]) continue;
+                        if (label[j] !== li) continue;
+                        r += colorF[j * 3]; g += colorF[j * 3 + 1]; b += colorF[j * 3 + 2]; cnt++;
+                    }
+                    colorF[i * 3] = r / cnt; colorF[i * 3 + 1] = g / cnt; colorF[i * 3 + 2] = b / cnt;
                 }
-                if (cnt > 0) { colorF[i * 3] = r / cnt; colorF[i * 3 + 1] = g / cnt; colorF[i * 3 + 2] = b / cnt; }
             }
         }
         // 出力テクスチャ: RGB は全画素（非対象は元画像色 → シーム/バイリニアのにじみ防止）、

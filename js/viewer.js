@@ -178,6 +178,8 @@ const Viewer = (function () {
             meshHeight,
             !currentViewerOptions.disableDepthEdgeCleanup
         );
+        // 段差カットで孤立した小さい/細いポリ（フリンジのちぎれ等）を除去する
+        removeSmallFaceComponents(geometry, 64);
         // シーム分割で頂点が追加されると attribute 配列が差し替わる
         const finalPositions = geometry.attributes.position.array;
         updateFiniteGeometryBounds(geometry, finalPositions);
@@ -289,12 +291,26 @@ const Viewer = (function () {
             uvs[i * 2 + 1] = 1 - (((i / W) | 0) + 0.5) / H;
         }
         geometry.attributes.position.needsUpdate = true;
-        // 生成レイヤーは背景面ごとにラベル分けされ、隣接ラベル間には深度段差が残る。
-        // 種の手前突出は 1e で除去済みなので、背景同士は極力繋いで視差時の黒穴を防ぎ、
-        // 極端な段差（背景 vs 空バックドロップ = 近深度の BACKFILL_DEPTH_JUMP 倍以上奥）
-        // だけ切る。しきい値を上げるほど黒穴は減るが、大きく離れた背景を繋ぐ薄壁が増える。
-        const BACKFILL_DEPTH_JUMP = 1.0;   // 相対段差 >1.0（=奥が手前の2倍超）で切る
-        removeInvalidAndDiscontinuousFaces(geometry, positions, true, BACKFILL_DEPTH_JUMP);
+        // backfill の面カットは「相対深度比」ではなく「視差(disparity)差」で判定する。
+        // 目的は視差で背面が見えることの緩和で、視差量 ∝ disparity 差 (1/z_near - 1/z_far)。
+        // 遠い面同士は比が大きくても disparity 差が小さい（視差小）ので繋がり、奥穴を埋める。
+        // 手前を含む面は disparity 差が大きい（視差大）ので切れ、奥から手前へ伸びる smear を除去する。
+        // しきい値はシーン中央値 disparity に対する比 PARALLAX_K（スケール不変）。
+        //   上げる→切りにくい（黒穴減・smear 増） / 下げる→切りやすい（smear 減・黒穴増）
+        const PARALLAX_K = 0.5;
+        const disps = [];
+        for (let p = 2; p < positions.length; p += 3) {
+            const z = positions[p];
+            if (Number.isFinite(z) && Math.abs(z) > 1e-6) disps.push(1 / Math.abs(z));
+        }
+        let dispGapThreshold = Infinity;   // データ無し時は切らない
+        if (disps.length) {
+            disps.sort((a, b) => a - b);
+            dispGapThreshold = PARALLAX_K * disps[disps.length >> 1];
+        }
+        removeInvalidAndDiscontinuousFaces(geometry, positions, true, dispGapThreshold);
+        // 視差カットで孤立した小さい/細い fill 片（面張りの元）を除去する
+        removeSmallFaceComponents(geometry, 64);
         if (!geometry.index || geometry.index.count === 0) { geometry.dispose(); return; }
         updateFiniteGeometryBounds(geometry, positions);
         geometry.computeVertexNormals();
@@ -428,6 +444,19 @@ const Viewer = (function () {
                 // far プレートと near プレートを両方張る
                 for (let side = 0; side < 2; side++) {
                     const wantFar = side === 0;
+                    // このプレート側の実在角が内部でさらに段差を持つ場合（＝3つ以上の深度が
+                    // 集まる三重点セル）、2値分割では中間深度を跨ぐ面（スパイク）になる。
+                    // そのプレートは張らずに欠かせ、背後は backfill が埋める。
+                    let sMin = Infinity, sMax = -Infinity, sideCount = 0;
+                    for (let k = 0; k < 4; k++) {
+                        if ((cornerZ[k] > t) === wantFar) {
+                            sideCount++;
+                            if (cornerZ[k] < sMin) sMin = cornerZ[k];
+                            if (cornerZ[k] > sMax) sMax = cornerZ[k];
+                        }
+                    }
+                    if (sideCount === 0) continue;
+                    if (sMax - sMin > relativeDepthThreshold * Math.max(sMin, 1e-6)) continue;
                     for (let k = 0; k < 4; k++) {
                         const isFar = cornerZ[k] > t;
                         if (isFar === wantFar) {
@@ -463,14 +492,14 @@ const Viewer = (function () {
 
     // Do not connect masked pixels or surfaces separated by a large depth jump.
     // A regular image-grid mesh otherwise produces long sheets at silhouettes.
-    // relThreshold は「相対深度段差 > relThreshold*近深度」で面を切る基準。backfill は
-    // 種の手前突出を 1e で除去済みなので、背景同士は極力繋いで黒穴を防ぎ、極端な段差
-    // （背景 vs 空バックドロップなど）だけ切りたい。呼び出し側で大きめの値を渡す。
-    function removeInvalidAndDiscontinuousFaces(geometry, positions, removeDepthEdges, relThreshold) {
+    // dispGapThreshold は視差(disparity)差の上限。面の (1/z_near - 1/z_far) がこれを超えたら
+    // 切る。視差差が小さい遠い面同士は繋がり(奥穴を埋める)、視差差が大きい手前を含む面は
+    // 切れる(奥から手前へ伸びる smear を除去)。呼び出し側でシーン中央値 disparity 基準で渡す。
+    function removeInvalidAndDiscontinuousFaces(geometry, positions, removeDepthEdges, dispGapThreshold) {
         if (!geometry.index) return;
         const source = geometry.index.array;
         const kept = [];
-        const relativeDepthThreshold = (typeof relThreshold === 'number') ? relThreshold : 0.10;
+        const gapThreshold = (typeof dispGapThreshold === 'number') ? dispGapThreshold : Infinity;
 
         for (let i = 0; i < source.length; i += 3) {
             const a = source[i], b = source[i + 1], c = source[i + 2];
@@ -483,14 +512,51 @@ const Viewer = (function () {
             }
 
             if (removeDepthEdges) {
-                const minDepth = Math.min(Math.abs(az), Math.abs(bz), Math.abs(cz));
-                const depthJump = Math.max(az, bz, cz) - Math.min(az, bz, cz);
-                if (depthJump > relativeDepthThreshold * Math.max(minDepth, 1e-6)) continue;
+                const zNear = Math.min(Math.abs(az), Math.abs(bz), Math.abs(cz));
+                const zFar = Math.max(Math.abs(az), Math.abs(bz), Math.abs(cz));
+                // 視差差 = 近点と遠点の disparity 差。近点が手前ほど、遠点との差が大きい。
+                const dispGap = 1 / Math.max(zNear, 1e-6) - 1 / Math.max(zFar, 1e-6);
+                if (dispGap > gapThreshold) continue;
             }
             kept.push(a, b, c);
         }
 
         geometry.setIndex(kept);
+    }
+
+    // 面カット後に孤立して残る「小さい/細い」連結成分を除去する。face を頂点共有で
+    // union-find し、面数が minFaces 未満の成分の面を捨てる。段差カット（視差カット・
+    // 三重点・NaN）で切り離された小片や、それを種にした backfill の細い面張りを消す。
+    // 巨大な連結面（主メッシュ本体・広い背景）は残る。除去面は透明になり再充填しない。
+    function removeSmallFaceComponents(geometry, minFaces) {
+        if (!geometry.index || minFaces <= 1) return;
+        const idx = geometry.index.array;
+        const nF = idx.length / 3;
+        if (nF === 0) return;
+        const vCount = geometry.attributes.position.count;
+        const parent = new Int32Array(nF);
+        for (let f = 0; f < nF; f++) parent[f] = f;
+        const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+        const vFirst = new Int32Array(vCount).fill(-1);
+        for (let f = 0; f < nF; f++) {
+            for (let k = 0; k < 3; k++) {
+                const v = idx[f * 3 + k];
+                const p = vFirst[v];
+                if (p < 0) vFirst[v] = f;
+                else { const ra = find(f), rb = find(p); if (ra !== rb) parent[ra] = rb; }
+            }
+        }
+        const size = new Int32Array(nF);
+        for (let f = 0; f < nF; f++) size[find(f)]++;
+        let removed = 0;
+        const kept = [];
+        for (let f = 0; f < nF; f++) {
+            if (size[find(f)] >= minFaces) {
+                const b = f * 3;
+                kept.push(idx[b], idx[b + 1], idx[b + 2]);
+            } else removed++;
+        }
+        if (removed > 0) geometry.setIndex(kept);
     }
 
     // Masked vertices remain NaN so exports and point mode preserve invalid

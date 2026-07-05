@@ -45,7 +45,39 @@ const EdgeSnap = (function () {
                 }
             }
         }
-        if (edgePairs === 0) return null;
+        // 1b. 窓内の急勾配ランプを追加検出（隣接対では拾えない「数pxの大勾配」）。
+        // 各ステップが rtol 未満でも数px で大きく変化する遷移帯（fg/bg 境界のボケ）は
+        // 上の隣接対比較を通り抜け、主メッシュで奥へ長く伸びる薄板になる。半径 WIN_R 内に
+        // 「自分より WIN_T 以上手前の画素」と「WIN_T 以上奥の画素」が両方あれば、手前台地と
+        // 奥台地に挟まれた中間ランプとみなしフラグする。台地は片側しか差が無いので拾わず、
+        // 総変化の小さい gentle な連続斜面も（窓内で両側の大差が揃わないので）拾わない。
+        const WIN_R = 3;       // 窓半径(px)。「スクリーンスペースで数px」の勾配を対象
+        const WIN_T = 0.12;    // 手前/奥それぞれの相対しきい値（両側必要＝実質2倍で急勾配のみ）
+        let windowFlagged = 0;
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                const i = y * W + x;
+                if (!validMask[i] || flagged[i]) continue;
+                const di = depth[i];
+                if (!(di > 0)) continue;
+                const nearD = di / (1 + WIN_T), farD = di * (1 + WIN_T);
+                let hasNear = false, hasFar = false;
+                for (let dy = -WIN_R; dy <= WIN_R && !(hasNear && hasFar); dy++) {
+                    const ny = y + dy; if (ny < 0 || ny >= H) continue;
+                    for (let dx = -WIN_R; dx <= WIN_R; dx++) {
+                        const nx = x + dx; if (nx < 0 || nx >= W) continue;
+                        const j = ny * W + nx;
+                        if (!validMask[j]) continue;
+                        const dj = depth[j];
+                        if (dj < nearD) hasNear = true;
+                        else if (dj > farD) hasFar = true;
+                        if (hasNear && hasFar) break;
+                    }
+                }
+                if (hasNear && hasFar) { flagged[i] = 1; windowFlagged++; }
+            }
+        }
+        if (edgePairs === 0 && windowFlagged === 0) return null;
 
         // 2. 台地からの伝播。有効かつ非フラグの画素を種（確定）とし、各ランプ画素は
         //    確定済み4近傍のうち「元の深度と対数距離が最も近い」値へ吸着する。
@@ -106,7 +138,7 @@ const EdgeSnap = (function () {
             newPoints[i * 3 + 2] = newDepth[i];
         }
 
-        const stats = { edgePairs, snapped, unresolved: pending.length };
+        const stats = { edgePairs, windowFlagged, snapped, unresolved: pending.length };
         console.log('[EdgeSnap]', { rtol, maxRampPx, ...stats });
         return { depth: newDepth, points: newPoints, uvSrcIndex: srcRoot, stats };
     }
