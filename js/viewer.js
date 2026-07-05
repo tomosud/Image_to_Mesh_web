@@ -289,10 +289,12 @@ const Viewer = (function () {
             uvs[i * 2 + 1] = 1 - (((i / W) | 0) + 0.5) / H;
         }
         geometry.attributes.position.needsUpdate = true;
-        // 生成レイヤーは背景面ごとにラベル分けされ、隣接ラベル間には深度段差が残る
-        // （空 vs 建物 など）。その段差を面で繋ぐと手前へ伸びるリボンになるため、
-        // NaN 面に加えて深度段差セルも除去する（段差は主メッシュの裏に隠れる）。
-        removeInvalidAndDiscontinuousFaces(geometry, positions, true);
+        // 生成レイヤーは背景面ごとにラベル分けされ、隣接ラベル間には深度段差が残る。
+        // 種の手前突出は 1e で除去済みなので、背景同士は極力繋いで視差時の黒穴を防ぎ、
+        // 極端な段差（背景 vs 空バックドロップ = 近深度の BACKFILL_DEPTH_JUMP 倍以上奥）
+        // だけ切る。しきい値を上げるほど黒穴は減るが、大きく離れた背景を繋ぐ薄壁が増える。
+        const BACKFILL_DEPTH_JUMP = 1.0;   // 相対段差 >1.0（=奥が手前の2倍超）で切る
+        removeInvalidAndDiscontinuousFaces(geometry, positions, true, BACKFILL_DEPTH_JUMP);
         if (!geometry.index || geometry.index.count === 0) { geometry.dispose(); return; }
         updateFiniteGeometryBounds(geometry, positions);
         geometry.computeVertexNormals();
@@ -461,11 +463,14 @@ const Viewer = (function () {
 
     // Do not connect masked pixels or surfaces separated by a large depth jump.
     // A regular image-grid mesh otherwise produces long sheets at silhouettes.
-    function removeInvalidAndDiscontinuousFaces(geometry, positions, removeDepthEdges) {
+    // relThreshold は「相対深度段差 > relThreshold*近深度」で面を切る基準。backfill は
+    // 種の手前突出を 1e で除去済みなので、背景同士は極力繋いで黒穴を防ぎ、極端な段差
+    // （背景 vs 空バックドロップなど）だけ切りたい。呼び出し側で大きめの値を渡す。
+    function removeInvalidAndDiscontinuousFaces(geometry, positions, removeDepthEdges, relThreshold) {
         if (!geometry.index) return;
         const source = geometry.index.array;
         const kept = [];
-        const relativeDepthThreshold = 0.10;
+        const relativeDepthThreshold = (typeof relThreshold === 'number') ? relThreshold : 0.10;
 
         for (let i = 0; i < source.length; i += 3) {
             const a = source[i], b = source[i + 1], c = source[i + 2];

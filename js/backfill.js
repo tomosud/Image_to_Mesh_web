@@ -323,18 +323,22 @@ const Backfill = (function () {
 
         // ---- 5. 色の伸長（同一ラベル内のみ平滑化）----
         // 初期値 = BFS で伝播した最寄り奥側エッジの中央値色（1e）。等深度延長は種色を
-        // 延長方向へ平行に敷くため、高周波エッジでは縞に見える。同一ラベル内で反復
-        // 平滑化して延長方向と直交にブレンドし、縞を緩和する（別ラベルとは混ぜない）。
-        for (let it = 0; it < 12; it++) {
+        // 延長方向へ平行に敷くため、高周波エッジでは縞に見える。同一ラベル内で反復平滑化
+        // して縞を潰す。8近傍＋多パスで急速に拡散させる（別ラベルとは混ぜない）。
+        // 縞が残るなら COLOR_SMOOTH_PASSES を増やす。完全な除去は将来 inpainting で対応。
+        const COLOR_SMOOTH_PASSES = 40;
+        const OFFS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+        for (let it = 0; it < COLOR_SMOOTH_PASSES; it++) {
             for (const i of synthList) {
                 const x = i % W, y = (i / W) | 0;
+                const li = label[i];
                 let r = 0, g = 0, b = 0, cnt = 0;
-                for (const [dx, dy] of OFFS) {
+                for (const [dx, dy] of OFFS8) {
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                     const j = ny * W + nx;
                     if (!synth[j] && !seed[j]) continue;
-                    if (label[j] !== label[i]) continue;
+                    if (label[j] !== li) continue;
                     r += colorF[j * 3]; g += colorF[j * 3 + 1]; b += colorF[j * 3 + 2]; cnt++;
                 }
                 if (cnt > 0) { colorF[i * 3] = r / cnt; colorF[i * 3 + 1] = g / cnt; colorF[i * 3 + 2] = b / cnt; }
