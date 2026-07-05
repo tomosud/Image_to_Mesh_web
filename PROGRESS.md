@@ -73,3 +73,4 @@ MoGe 後処理が返す正規化 `fx/fy` から水平・垂直画角を計算す
 - 構文確認: `node --check js/depth_upsample.js`、`node --check js/main.js`、`node --check js/download.js` は PASS。
 - ブラウザ実機確認は `CLAUDE.md` ルールどおりユーザー側で実施予定。
 - 連続ドロップ/選択/再計算で ONNX Runtime の同一 session に並列 `run()` が入らないよう、`processImage` と `recompute` に排他ガードを追加。処理中の追加要求は警告して無視する。
+- High-Res Depth の長文 tooltip がパネル内で読みにくかったため、各 depth upsample パラメータの説明を `Depth parameter guide` の折りたたみ表示へ移動。

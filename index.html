@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image to Mesh — World Position Viewer</title>
     <link rel="icon" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3e%3cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3e%3c/svg%3e">
-    <link rel="stylesheet" href="css/style.css?v=20260705-5">
+    <link rel="stylesheet" href="css/style.css?v=20260705-6">
 </head>
 <body>
     <div id="container">
@@ -95,9 +95,30 @@
                             <input type="checkbox" id="depthUpsampleEnable" checked>
                             High-Res Depth
                         </label>
-                        <span class="help-tip" tabindex="0" role="note" data-tooltip="Upsamples metric depth to the input image aspect ratio, capped at 2048 px on the long edge. WebGPU applies an RGB-guided joint bilateral filter; unavailable WebGPU falls back to the initial resize." aria-label="High-Res Depth help">?</span>
+                        <span class="help-tip" tabindex="0" role="note" data-tooltip="Open the guide below for parameter details." aria-label="High-Res Depth help">?</span>
                     </div>
                     <div id="depthUpsampleStatus" class="control-status">Depth upsampling: pending</div>
+                    <details class="control-details">
+                        <summary>Depth parameter guide</summary>
+                        <dl>
+                            <dt>High-Res Depth</dt>
+                            <dd>Upsamples metric depth to the input image aspect ratio, capped at 2048 px on the long edge.</dd>
+                            <dt>Initial Depth Resize</dt>
+                            <dd>Creates the first high-res depth. Bilinear is smoother; Nearest keeps harder steps for sharper edge-guided filtering.</dd>
+                            <dt>JBU Radius</dt>
+                            <dd>Pixel radius sampled by the WebGPU joint bilateral filter. Larger values smooth wider areas and cost more.</dd>
+                            <dt>Sigma Space</dt>
+                            <dd>Controls distance falloff inside the radius. Lower values keep the filter more local.</dd>
+                            <dt>Sigma Color</dt>
+                            <dd>Controls how strongly RGB edges block depth mixing. Lower values preserve image edges more aggressively.</dd>
+                            <dt>Sigma Depth</dt>
+                            <dd>Controls how strongly depth differences block mixing, in meters. Lower values preserve depth discontinuities.</dd>
+                            <dt>Treat 0 depth as invalid</dt>
+                            <dd>Excludes zero depth from filtering. Keep this on unless zero is intentionally valid depth.</dd>
+                            <dt>Invalid Depth Value</dt>
+                            <dd>Optional exact sentinel depth to exclude, such as -1. NaN, Infinity, and negative depths are always invalid.</dd>
+                        </dl>
+                    </details>
                 </div>
                 <div class="control-group">
                     <label>Initial Depth Resize</label>
