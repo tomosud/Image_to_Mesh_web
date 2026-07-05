@@ -41,6 +41,9 @@
 - Small Component Faces: `64`
 - Sky / Masked Area: Sky Backdrop
 - Fill Margin: `25%` of original image long edge
+- Backfill Parallax Cut: `0.50x` scene median disparity
+- Backfill Front Clamp: `1.00x` assigned edge disparity
+- Backfill Far Clamp: `4.0x` assigned edge depth
 - SkyMaskColorFill inner ring: `4px`
 
 ## 要実機確認

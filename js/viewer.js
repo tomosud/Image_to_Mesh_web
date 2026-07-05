@@ -12,6 +12,7 @@ const Viewer = (function () {
     let currentBackfillLayer = null;  // Backfill.generate() の戻り値
     let backfillMesh = null;          // THREE.Mesh | THREE.Points
     let backfillTextureObject = null;
+    let backfillParallaxCutK = 0.5;
     let currentBaseName = '';
     let currentIntrinsics = null;     // normalized { fx, fy, cx, cy }
     let currentViewerOptions = {};
@@ -239,6 +240,12 @@ const Viewer = (function () {
         if (initialized) rebuildBackfillMesh();
     }
 
+    function setBackfillParallaxCutK(value) {
+        const k = Number(value);
+        backfillParallaxCutK = Number.isFinite(k) ? Math.max(0.001, k) : 0.5;
+        if (initialized) rebuildBackfillMesh();
+    }
+
     function getBackfillTextureObject() {
         if (!currentBackfillLayer) return null;
         if (!backfillTextureObject) {
@@ -295,9 +302,8 @@ const Viewer = (function () {
         // 目的は視差で背面が見えることの緩和で、視差量 ∝ disparity 差 (1/z_near - 1/z_far)。
         // 遠い面同士は比が大きくても disparity 差が小さい（視差小）ので繋がり、奥穴を埋める。
         // 手前を含む面は disparity 差が大きい（視差大）ので切れ、奥から手前へ伸びる smear を除去する。
-        // しきい値はシーン中央値 disparity に対する比 PARALLAX_K（スケール不変）。
+        // しきい値はシーン中央値 disparity に対する比 backfillParallaxCutK（スケール不変）。
         //   上げる→切りにくい（黒穴減・smear 増） / 下げる→切りやすい（smear 減・黒穴増）
-        const PARALLAX_K = 0.5;
         const disps = [];
         for (let p = 2; p < positions.length; p += 3) {
             const z = positions[p];
@@ -306,7 +312,7 @@ const Viewer = (function () {
         let dispGapThreshold = Infinity;   // データ無し時は切らない
         if (disps.length) {
             disps.sort((a, b) => a - b);
-            dispGapThreshold = PARALLAX_K * disps[disps.length >> 1];
+            dispGapThreshold = backfillParallaxCutK * disps[disps.length >> 1];
         }
         removeInvalidAndDiscontinuousFaces(geometry, positions, true, dispGapThreshold);
         // 視差カットで孤立した小さい/細い fill 片（面張りの元）を除去する
@@ -1531,7 +1537,7 @@ const Viewer = (function () {
     }
 
     return {
-        init, setData, setBackfillLayer, resetCamera,
+        init, setData, setBackfillLayer, setBackfillParallaxCutK, resetCamera,
         toggleHorizontalGridAdjustment, useHorizontalGrid,
         setPointsMode, setPointSize, toggleWireframe,
         setLighting, setColorDisabled, isPoints,

@@ -148,6 +148,10 @@ Backfill creates a second background layer behind depth-edge silhouettes.
 - Default: `25%`
 - The UI also shows the equivalent processing-grid pixel distance in parentheses after an image is loaded
 - Increasing the value extends both the backfill mesh area and its generated texture farther behind foreground silhouettes
+- **Backfill Parallax Cut** controls only the backfill mesh face cut. It is a multiplier of scene median disparity, default `0.50x`
+- Higher values keep more backfill connected; lower values cut foreground-facing smears more aggressively
+- **Backfill Front Clamp** limits generated disparity relative to the assigned background edge, default `1.00x`
+- **Backfill Far Clamp** limits generated depth relative to the assigned background edge, default `4.0x`
 
 ### Small Component Faces
 

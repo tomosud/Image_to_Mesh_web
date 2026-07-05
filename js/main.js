@@ -296,6 +296,21 @@
         return parseFloat($('fillMargin').value);
     }
 
+    function getBackfillParallaxCutK() {
+        const value = parseFloat($('backfillParallaxCut').value);
+        return Number.isFinite(value) ? value : 0.5;
+    }
+
+    function getBackfillFrontClamp() {
+        const value = parseFloat($('backfillFrontClamp').value);
+        return Number.isFinite(value) ? value : 1.0;
+    }
+
+    function getBackfillFarClamp() {
+        const value = parseFloat($('backfillFarClamp').value);
+        return Number.isFinite(value) ? value : 4.0;
+    }
+
     function getSmallComponentMinFaces() {
         const value = parseInt($('smallComponentFaces').value, 10);
         return Number.isFinite(value) ? Math.max(0, value) : 64;
@@ -314,6 +329,15 @@
         const percent = getFillMarginPercent();
         const px = currentImageData && currentPost ? ` (${getBackfillMarginPx()}px)` : '';
         $('fillMarginValue').textContent = `${percent.toFixed(1)}%${px}`;
+    }
+
+    function updateBackfillParallaxCutLabel() {
+        $('backfillParallaxCutValue').textContent = `${getBackfillParallaxCutK().toFixed(2)}x`;
+    }
+
+    function updateBackfillClampLabels() {
+        $('backfillFrontClampValue').textContent = `${getBackfillFrontClamp().toFixed(2)}x`;
+        $('backfillFarClampValue').textContent = `${getBackfillFarClamp().toFixed(1)}x`;
     }
 
     // 遮蔽穴インペイント（backfill.js）。推論・主レイヤーは再計算しない軽量パス。
@@ -340,7 +364,11 @@
                 color: currentPatchedImage || currentImageData,
                 width,
                 height
-            }, { marginPx: getBackfillMarginPx() });
+            }, {
+                marginPx: getBackfillMarginPx(),
+                frontDispLimit: getBackfillFrontClamp(),
+                maxDepthFactor: getBackfillFarClamp()
+            });
         }
         Viewer.setBackfillLayer(currentBackfill);
         $('dlBackfillWP').disabled = !currentBackfill;
@@ -513,6 +541,18 @@
             updateFillMarginLabel();
         });
         $('fillMargin').addEventListener('change', updateBackfill);
+        $('backfillParallaxCut').addEventListener('input', (e) => {
+            updateBackfillParallaxCutLabel();
+            Viewer.setBackfillParallaxCutK(getBackfillParallaxCutK());
+        });
+        $('backfillFrontClamp').addEventListener('input', (e) => {
+            updateBackfillClampLabels();
+        });
+        $('backfillFrontClamp').addEventListener('change', updateBackfill);
+        $('backfillFarClamp').addEventListener('input', (e) => {
+            updateBackfillClampLabels();
+        });
+        $('backfillFarClamp').addEventListener('change', updateBackfill);
         $('recompute').addEventListener('click', () => {
             // モデル変更 or num_tokens が変わっていれば再推論、そうでなければ後処理のみ
             if ((!modelReady || getNumTokens() !== lastNumTokens) && currentImageData) {
@@ -566,6 +606,9 @@
 
         updateDepthUpsampleLabels();
         updateFillMarginLabel();
+        updateBackfillParallaxCutLabel();
+        updateBackfillClampLabels();
+        Viewer.setBackfillParallaxCutK(getBackfillParallaxCutK());
         [
             'depthUpsampleEnable',
             'depthInitialMode',

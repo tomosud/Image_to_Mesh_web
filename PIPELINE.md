@@ -148,6 +148,9 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 - **BFS の margin 外に残った穴を最寄りリムで閉じる（2c）。** 黒く残った holeMask 画素へ、層から
   「最も手前(=最大 disparity)のリム値」を伝播して埋める。最寄りリムなので奥へ突き出さず、
   視差時の黒穴を減らす。`CLOSE_PASSES`=64 を超える巨大穴の芯は黒のまま
+- 生成 depth は同一ラベル内の平滑化中に `Backfill Front Clamp` / `Backfill Far Clamp` で制限する。
+  既定では front clamp `1.00x` により割り当てエッジより手前へ出さず、far clamp `4.0x` により
+  割り当てエッジ深度の4倍より奥へ飛ばない
 - 色は手順5/7で補正済みの表示/backfill 用画像をモデル解像度に縮小した基準色を、割り当て済み
   ラベルに沿って伝播し、間隔を 16,8,4,2,1 と変える à-trous 平滑化で徐々に拡散させて延長方向の
   縞を緩和する（同一ラベル内のみ）
@@ -156,7 +159,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
   `(1/z_near - 1/z_far)` がしきい値を超えたら切る。目的が「視差で背面が見えることの緩和」で、
   視差量 ∝ disparity 差だから。遠い面同士は深度比が大きくても disparity 差が小さい（視差小）
   ので繋がり奥穴を埋め、手前を含む面は disparity 差が大きい（視差大）ので切れて奥から手前へ
-  伸びる smear を除去する。しきい値 = シーン中央値 disparity × `PARALLAX_K`（=0.5、スケール不変）。
+  伸びる smear を除去する。しきい値 = シーン中央値 disparity × `Backfill Parallax Cut`（既定 `0.50`、スケール不変）。
   上げる→切りにくい（黒穴減・smear 増）／下げる→切りやすい（smear 減・黒穴増）
 - 視差カット後、Small Component Faces 未満の孤立連結成分を除去する（`removeSmallFaceComponents`、主メッシュと共通、既定 `64`）。
   カットで切り離された細い fill 片（面張りの元）を消す
@@ -191,11 +194,16 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 | Small Component Faces | 9, 10 |
 | Sky / Masked Area | 3, 4, 5 |
 | Fill Occlusion / Fill Margin | 10 |
+| Backfill Parallax Cut | 10（backfill メッシュの視差カットのみ。backfill 生成は再計算しない） |
+| Backfill Front Clamp / Far Clamp | 10（backfill 生成深度のクランプ。backfill のみ再生成） |
 
 固定しきい値 / UI既定値:
 
 - mesh seam split: relative depth jump `0.10`
 - Fill Margin UI: original image long edge percentage, default `25%`; converted to processing-grid `marginPx` before `Backfill.generate`
+- Backfill Parallax Cut: scene median disparity multiplier, default `0.50`
+- Backfill Front Clamp: max generated disparity multiplier, default `1.00`
+- Backfill Far Clamp: max generated depth multiplier, default `4.0`
 - backfill 種検出: relative depth jump `0.10`
 - ColorPatch 帯・側判定: relative depth jump `0.10`
 - SkyMaskColorFill 内周幅: `4px`

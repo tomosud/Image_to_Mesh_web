@@ -201,6 +201,25 @@
                         <input type="range" id="fillMargin" min="0.5" max="50" step="0.5" value="25">
                     </div>
                 </div>
+                <div class="control-group">
+                    <label>Backfill Parallax Cut: <span id="backfillParallaxCutValue">0.50x</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Backfill mesh face cut threshold as a multiplier of the scene median disparity. Higher values keep more backfill faces connected; lower values cut foreground-facing smears more aggressively." aria-label="Backfill Parallax Cut help">?</span></label>
+                    <div class="slider-container">
+                        <input type="range" id="backfillParallaxCut" min="0.05" max="2.00" step="0.05" value="0.50">
+                    </div>
+                    <div class="control-help">Cuts a backfill face when its disparity gap is larger than this value times the median scene disparity.</div>
+                </div>
+                <div class="control-group">
+                    <label>Backfill Front Clamp: <span id="backfillFrontClampValue">1.00x</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Maximum generated disparity relative to the assigned background edge. 1.00 prevents generated fill from moving closer than its edge; lower pushes it farther back; higher allows protrusion." aria-label="Backfill Front Clamp help">?</span></label>
+                    <div class="slider-container">
+                        <input type="range" id="backfillFrontClamp" min="0.50" max="1.50" step="0.05" value="1.00">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Backfill Far Clamp: <span id="backfillFarClampValue">4.0x</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="Maximum generated depth relative to the assigned background edge. Larger values allow deeper extrapolation; smaller values keep fill closer to the edge depth." aria-label="Backfill Far Clamp help">?</span></label>
+                    <div class="slider-container">
+                        <input type="range" id="backfillFarClamp" min="1.00" max="16.00" step="0.25" value="4.00">
+                    </div>
+                </div>
                 <div class="control-group dl-group">
                     <div class="dl-title">Downloads</div>
                     <button id="dlImage" disabled>Original</button>
@@ -263,10 +282,10 @@
     <script src="js/colorpatch.js?v=20260705-2"></script>
     <script src="js/worldpos.js?v=20260620-13"></script>
     <script src="js/normalmap.js?v=20260620-13"></script>
-    <script src="js/backfill.js?v=20260705-5"></script>
-    <script src="js/viewer.js?v=20260705-16"></script>
+    <script src="js/backfill.js?v=20260705-6"></script>
+    <script src="js/viewer.js?v=20260705-17"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260705-1"></script>
-    <script src="js/main.js?v=20260705-11"></script>
+    <script src="js/main.js?v=20260705-13"></script>
 </body>
 </html>

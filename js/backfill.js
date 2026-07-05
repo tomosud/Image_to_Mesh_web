@@ -37,7 +37,7 @@ const Backfill = (function () {
     // メイン処理
     // input: { depth: Float32[H*W](metric), validMask: Uint8(切断後有効), holeMask: Uint8(エッジ切断で消えた画素),
     //          intrinsics: {fx,fy,cx,cy}(正規化), color: ImageData(元解像度), width, height }
-    // opts: { marginPx, jumpTol }
+    // opts: { marginPx, jumpTol, frontDispLimit, maxDepthFactor }
     // 戻り値: { worldPos: Float32[H*W*4], colorTex, validMask: Uint8, width, height, stats } | null
     function generate(input, opts) {
         const { depth, validMask, holeMask, intrinsics, width: W, height: H } = input;
@@ -45,6 +45,8 @@ const Backfill = (function () {
         // viewer.removeInvalidAndDiscontinuousFaces の relativeDepthThreshold と同じ既定値。
         // これを超える段差で面が除去され隙間が開くため、同じ基準で種を検出する。
         const jumpTol = (opts && opts.jumpTol) || 0.10;
+        const frontDispLimit = Math.max(0.001, (opts && opts.frontDispLimit) || 1.0);
+        const maxDepthFactor = Math.max(1.0, (opts && opts.maxDepthFactor) || 4.0);
         const COLLAR_PX = 4;      // 奥面への食い込み幅（継ぎ目を主メッシュの裏に隠す）
         const PUSH_BASE = 0.015;  // 層全体の基礎押し込み（z-fighting とクラック回避）
         const PUSH_BACK = 0.04;   // 種から離れるほど追加で奥へ押し込む最大比率
@@ -327,7 +329,7 @@ const Backfill = (function () {
         // 初期値 = BFS で割り当てた最寄り奥側エッジの disparity（等深度延長）。
         // 同じラベル（同じ背景面）の隣接のみで Gauss-Seidel 平滑化し、別背景面とは
         // 繋がない。これにより深度の異なる背景を跨ぐ「膜」が張られない。各画素は反復
-        // 内で「割り当てエッジより手前に出ない・種の4倍より奥へ行かない」でクランプ。
+        // 内で frontDispLimit / maxDepthFactor の範囲へクランプ。
         const disp = new Float32Array(N);
         for (let i = 0; i < N; i++) {
             if (seed[i]) { disp[i] = seedDispRobust[i]; continue; }  // Dirichlet も台地深度
@@ -349,9 +351,10 @@ const Backfill = (function () {
                 }
                 if (cnt === 0) continue;
                 let v = sum / cnt;
-                if (v > bgDisp[i]) v = bgDisp[i];              // 割り当てエッジより手前に出さない
-                const minDisp = bgDisp[i] * 0.25;
-                if (v < minDisp) v = minDisp;                  // 外挿の暴走防止（種の4倍まで）
+                const maxDisp = bgDisp[i] * frontDispLimit;
+                if (v > maxDisp) v = maxDisp;                  // 既定では割り当てエッジより手前に出さない
+                const minDisp = bgDisp[i] / maxDepthFactor;
+                if (v < minDisp) v = minDisp;                  // 外挿の暴走防止
                 disp[i] = v;
             }
         }
@@ -423,7 +426,7 @@ const Backfill = (function () {
         const wp = WorldPos.fromCameraPoints(camPoints, W, H, layerMask, { scale: 1.0, applyMask: true });
 
         const stats = { seeds: seedCount, filledPx };
-        console.log('[Backfill]', { ...stats, marginPx, jumpTol, size: `${W}x${H}` });
+        console.log('[Backfill]', { ...stats, marginPx, jumpTol, frontDispLimit, maxDepthFactor, size: `${W}x${H}` });
         return {
             worldPos: wp.data,
             colorTex: { data: colorOut, width: W, height: H },
