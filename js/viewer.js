@@ -1001,42 +1001,263 @@ const Viewer = (function () {
         return out;
     }
 
-    function exportOBJ() {
+    async function exportOBJ() {
         const target = mesh || pointsMesh;
         if (!target) { alert('No mesh is loaded.'); return; }
-        const geometry = target.geometry;
-        const positions = geometry.attributes.position.array;
-        const uvs = geometry.attributes.uv.array;
-        const indices = geometry.index ? geometry.index.array : null;
-        const alignment = getAlignmentTransform();
-        const exportRotation = activeOrbitPlane ? alignment.rotation : null;
-        const exportPoint = new THREE.Vector3();
+        if (!currentColorTexture) { alert('No texture is available for OBJ export.'); return; }
+        const base = sanitizeFileBase((currentBaseName || 'mesh').replace(/_worldposition$/, ''));
+        const objName = `${base}.obj`;
+        const mtlName = `${base}.mtl`;
+        const textureName = `${base}_texture.png`;
+        const normalName = currentNormalTexture ? `${base}_normal.png` : null;
+        const backfillTextureName = currentBackfillLayer && backfillMesh ? `${base}_backfill_texture.png` : null;
+        const geometry = createCompactExportGeometry(target.geometry);
+        if (!geometry || !geometry.index || geometry.index.count === 0) {
+            alert('No valid mesh faces are available for OBJ export.');
+            return;
+        }
+        let backfillGeometry = null;
+        if (backfillMesh && currentBackfillLayer) {
+            backfillGeometry = createCompactExportGeometry(backfillMesh.geometry);
+            if (!backfillGeometry || !backfillGeometry.index || backfillGeometry.index.count === 0) {
+                if (backfillGeometry) backfillGeometry.dispose();
+                backfillGeometry = null;
+            }
+        }
+        const objects = [
+            { name: 'AlignedMesh', material: 'image_to_mesh_material', geometry }
+        ];
+        if (backfillGeometry && backfillTextureName) {
+            objects.push({ name: 'BackfillMesh', material: 'backfill_material', geometry: backfillGeometry });
+        }
+        const obj = createOBJText(objects, objName, mtlName);
+        const mtl = createMTLText({
+            textureName,
+            normalName,
+            backfillTextureName: backfillGeometry ? backfillTextureName : null
+        });
+        try {
+            const files = [
+                { name: objName, data: encodeText(obj) },
+                { name: mtlName, data: encodeText(mtl) },
+                { name: textureName, data: await textureToPngBytes(currentColorTexture) }
+            ];
+            if (currentNormalTexture && normalName) {
+                files.push({ name: normalName, data: await textureToPngBytes(currentNormalTexture) });
+            }
+            if (backfillGeometry && currentBackfillLayer && backfillTextureName) {
+                files.push({ name: backfillTextureName, data: await textureToPngBytes(currentBackfillLayer.colorTex) });
+            }
+            const zip = createZip(files);
+            downloadBlob(new Blob([zip], { type: 'application/zip' }), `${base}_obj.zip`);
+        } catch (error) {
+            console.error(error);
+            alert('OBJ ZIP export failed: ' + (error && error.message ? error.message : error));
+        } finally {
+            geometry.dispose();
+            if (backfillGeometry) backfillGeometry.dispose();
+        }
+    }
 
-        let obj = '# World Position Mesh\n# Exported from Image to Mesh Web\n\n';
-        if (activeOrbitPlane) obj += '# Aligned to the selected horizontal grid: center=origin, normal=+Y\n\n';
-        for (let i = 0; i < positions.length; i += 3) {
-            let x = positions[i], y = positions[i + 1], z = positions[i + 2];
-            if (exportRotation && Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
-                exportPoint.set(x, y, z)
-                    .sub(alignment.center)
-                    .applyQuaternion(exportRotation);
-                x = exportPoint.x; y = exportPoint.y; z = exportPoint.z;
+    function createOBJText(objects, objName, mtlName) {
+        let obj = '# World Position Mesh\n# Exported from Image to Mesh Web\n';
+        obj += `# Package: ${objName}\n`;
+        if (activeOrbitPlane) obj += '# Aligned to the selected horizontal grid: center=origin, normal=+Y\n';
+        obj += `mtllib ${mtlName}\n`;
+        let vertexOffset = 0;
+        let uvOffset = 0;
+        let normalOffset = 0;
+        for (const item of objects) {
+            const geometry = item.geometry;
+            const positions = geometry.attributes.position.array;
+            const uvs = geometry.attributes.uv.array;
+            const normals = geometry.attributes.normal ? geometry.attributes.normal.array : null;
+            const indices = geometry.index ? geometry.index.array : null;
+
+            obj += `\no ${item.name}\n`;
+            for (let i = 0; i < positions.length; i += 3) {
+                obj += `v ${positions[i]} ${positions[i + 1]} ${positions[i + 2]}\n`;
             }
-            obj += `v ${x} ${y} ${z}\n`;
-        }
-        obj += '\n';
-        for (let i = 0; i < uvs.length; i += 2) {
-            obj += `vt ${uvs[i]} ${uvs[i + 1]}\n`;
-        }
-        obj += '\n';
-        if (indices) {
-            for (let i = 0; i < indices.length; i += 3) {
-                const i1 = indices[i] + 1, i2 = indices[i + 1] + 1, i3 = indices[i + 2] + 1;
-                obj += `f ${i1}/${i1} ${i2}/${i2} ${i3}/${i3}\n`;
+            obj += '\n';
+            for (let i = 0; i < uvs.length; i += 2) {
+                obj += `vt ${uvs[i]} ${uvs[i + 1]}\n`;
             }
+            obj += '\n';
+            if (normals) {
+                for (let i = 0; i < normals.length; i += 3) {
+                    obj += `vn ${normals[i]} ${normals[i + 1]} ${normals[i + 2]}\n`;
+                }
+                obj += '\n';
+            }
+            obj += `usemtl ${item.material}\n`;
+            obj += 's 1\n';
+            if (indices) {
+                for (let i = 0; i < indices.length; i += 3) {
+                    const a = indices[i], b = indices[i + 1], c = indices[i + 2];
+                    const i1 = a + 1 + vertexOffset, i2 = b + 1 + vertexOffset, i3 = c + 1 + vertexOffset;
+                    const t1 = a + 1 + uvOffset, t2 = b + 1 + uvOffset, t3 = c + 1 + uvOffset;
+                    if (normals) {
+                        const n1 = a + 1 + normalOffset, n2 = b + 1 + normalOffset, n3 = c + 1 + normalOffset;
+                        obj += `f ${i1}/${t1}/${n1} ${i2}/${t2}/${n2} ${i3}/${t3}/${n3}\n`;
+                    } else {
+                        obj += `f ${i1}/${t1} ${i2}/${t2} ${i3}/${t3}\n`;
+                    }
+                }
+            }
+            vertexOffset += positions.length / 3;
+            uvOffset += uvs.length / 2;
+            normalOffset += normals ? normals.length / 3 : 0;
         }
-        const fname = (currentBaseName || 'mesh').replace(/_worldposition$/, '') + '.obj';
-        downloadBlob(new Blob([obj], { type: 'text/plain' }), fname);
+        return obj;
+    }
+
+    function createMTLText({ textureName, normalName, backfillTextureName }) {
+        let mtl = 'newmtl image_to_mesh_material\n';
+        mtl += 'Ka 1 1 1\n';
+        mtl += 'Kd 1 1 1\n';
+        mtl += 'Ks 0 0 0\n';
+        mtl += 'd 1\n';
+        mtl += 'illum 2\n';
+        mtl += `map_Kd ${textureName}\n`;
+        if (normalName) {
+            mtl += `map_Bump ${normalName}\n`;
+            mtl += `bump ${normalName}\n`;
+            mtl += `norm ${normalName}\n`;
+        }
+        if (backfillTextureName) {
+            mtl += '\nnewmtl backfill_material\n';
+            mtl += 'Ka 1 1 1\n';
+            mtl += 'Kd 1 1 1\n';
+            mtl += 'Ks 0 0 0\n';
+            mtl += 'd 1\n';
+            mtl += 'illum 2\n';
+            mtl += `map_Kd ${backfillTextureName}\n`;
+        }
+        return mtl;
+    }
+
+    function sanitizeFileBase(value) {
+        return String(value || 'mesh')
+            .replace(/[\\/:*?"<>|]+/g, '_')
+            .replace(/\s+/g, '_')
+            .replace(/^_+|_+$/g, '') || 'mesh';
+    }
+
+    function encodeText(text) {
+        return new TextEncoder().encode(text);
+    }
+
+    function textureToPngBytes(source) {
+        return new Promise((resolve, reject) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = source.width;
+            canvas.height = source.height;
+            const context = canvas.getContext('2d');
+            const pixels = new Uint8ClampedArray(source.data);
+            context.putImageData(new ImageData(pixels, canvas.width, canvas.height), 0, 0);
+            canvas.toBlob((blob) => {
+                if (!blob) {
+                    reject(new Error('Failed to encode texture PNG.'));
+                    return;
+                }
+                blob.arrayBuffer().then((buffer) => resolve(new Uint8Array(buffer)), reject);
+            }, 'image/png');
+        });
+    }
+
+    function makeCrcTable() {
+        const table = new Uint32Array(256);
+        for (let n = 0; n < 256; n++) {
+            let c = n;
+            for (let k = 0; k < 8; k++) {
+                c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+            }
+            table[n] = c >>> 0;
+        }
+        return table;
+    }
+
+    const crcTable = makeCrcTable();
+
+    function crc32(data) {
+        let c = 0xffffffff;
+        for (let i = 0; i < data.length; i++) {
+            c = crcTable[(c ^ data[i]) & 0xff] ^ (c >>> 8);
+        }
+        return (c ^ 0xffffffff) >>> 0;
+    }
+
+    function createZip(files) {
+        const localParts = [];
+        const centralParts = [];
+        let offset = 0;
+        for (const file of files) {
+            const name = encodeText(file.name);
+            const data = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
+            const crc = crc32(data);
+
+            const local = new ArrayBuffer(30 + name.length);
+            const lv = new DataView(local);
+            lv.setUint32(0, 0x04034b50, true);
+            lv.setUint16(4, 20, true);
+            lv.setUint16(6, 0, true);
+            lv.setUint16(8, 0, true);
+            lv.setUint16(10, 0, true);
+            lv.setUint16(12, 0, true);
+            lv.setUint32(14, crc, true);
+            lv.setUint32(18, data.length, true);
+            lv.setUint32(22, data.length, true);
+            lv.setUint16(26, name.length, true);
+            lv.setUint16(28, 0, true);
+            new Uint8Array(local, 30).set(name);
+            localParts.push(new Uint8Array(local), data);
+
+            const central = new ArrayBuffer(46 + name.length);
+            const cv = new DataView(central);
+            cv.setUint32(0, 0x02014b50, true);
+            cv.setUint16(4, 20, true);
+            cv.setUint16(6, 20, true);
+            cv.setUint16(8, 0, true);
+            cv.setUint16(10, 0, true);
+            cv.setUint16(12, 0, true);
+            cv.setUint16(14, 0, true);
+            cv.setUint32(16, crc, true);
+            cv.setUint32(20, data.length, true);
+            cv.setUint32(24, data.length, true);
+            cv.setUint16(28, name.length, true);
+            cv.setUint16(30, 0, true);
+            cv.setUint16(32, 0, true);
+            cv.setUint16(34, 0, true);
+            cv.setUint16(36, 0, true);
+            cv.setUint32(38, 0, true);
+            cv.setUint32(42, offset, true);
+            new Uint8Array(central, 46).set(name);
+            centralParts.push(new Uint8Array(central));
+
+            offset += local.byteLength + data.length;
+        }
+
+        const centralOffset = offset;
+        const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+        const end = new ArrayBuffer(22);
+        const ev = new DataView(end);
+        ev.setUint32(0, 0x06054b50, true);
+        ev.setUint16(4, 0, true);
+        ev.setUint16(6, 0, true);
+        ev.setUint16(8, files.length, true);
+        ev.setUint16(10, files.length, true);
+        ev.setUint32(12, centralSize, true);
+        ev.setUint32(16, centralOffset, true);
+        ev.setUint16(20, 0, true);
+
+        const totalSize = centralOffset + centralSize + end.byteLength;
+        const out = new Uint8Array(totalSize);
+        let cursor = 0;
+        for (const part of localParts.concat(centralParts, [new Uint8Array(end)])) {
+            out.set(part, cursor);
+            cursor += part.length;
+        }
+        return out;
     }
 
     function exportGLB() {

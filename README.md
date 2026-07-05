@@ -18,9 +18,9 @@ https://github.com/user-attachments/assets/9ee06a21-c0db-4ef7-a144-4e5478724f1f
 - RGB-guided high-resolution depth upsampling, capped at 2048 px on the long edge
 - Textured mesh, point-cloud, wireframe, and unlit display modes
 - Estimated source-camera view
-- Three-point horizontal-plane and orbit-center adjustment
+- Three-point horizontal-plane direction adjustment
 - Adjustable masking and depth-edge cleanup
-- Depth EXR, tangent-space normal map PNG, aligned World Position EXR, OBJ, GLB, and PNG export
+- Depth EXR, tangent-space normal map PNG, aligned World Position EXR, OBJ ZIP, GLB, and PNG export
 - Local browser processing; input images are not uploaded
 
 ## Requirements
@@ -160,15 +160,15 @@ Invalid or non-positive depth values still cannot form geometry in the OFF mode.
 | Initial Depth (EXR) | Debug 32-bit FLOAT depth after initial high-resolution resize and before RGB-guided filtering |
 | Normal Map (PNG) | RGB tangent-space normal map generated from MoGe-2 normals |
 | Aligned WorldPos (EXR) | 32-bit FLOAT positions with `R=X`, `G=Y`, and `B=Z` |
-| OBJ | Triangle mesh with UV coordinates |
+| OBJ + Textures (ZIP) | ZIP containing OBJ, MTL, source-image texture PNG, tangent-space normal map PNG, and Backfill texture PNG when Backfill exists |
 | Scene GLB | Textured mesh with estimated source and current viewer cameras |
 | PNG (2048) | Current view rendered to a transparent 2048×2048 PNG |
 
-When a horizontal grid is confirmed, Aligned WorldPos EXR, OBJ, and Scene GLB use that coordinate system:
+When a horizontal grid is confirmed, Aligned WorldPos EXR, OBJ ZIP, and Scene GLB use that coordinate system:
 
-- Three-point center: origin
-- Selected plane: `Y=0`
-- Selected up direction: `+Y`
+- Initial source-camera target: origin
+- Selected horizontal direction: `Y=0`
+- Selected up/normal direction: `+Y`
 
 Scene GLB contains:
 
@@ -176,6 +176,8 @@ Scene GLB contains:
 - `EstimatedSourceCamera`
 - `CurrentViewCamera`
 - Source-image texture and tangent-space normal map
+
+OBJ ZIP uses the same source-image texture and tangent-space normal map as the GLB. When Backfill exists, the OBJ also contains a `BackfillMesh` object and the ZIP includes its Backfill texture PNG.
 
 Depth EXR remains in the original camera-depth coordinate system.
 

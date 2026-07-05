@@ -26,7 +26,7 @@
 - カメラ情報が変わらない後処理パラメータ変更では、現在のビューを維持したままメッシュだけ更新
 - depth 段差セルの near/far 2枚プレート分割と各1セル延長
 - 奥側エッジ由来の Backfill 第2レイヤー
-- Depth EXR、Initial Depth EXR、World Position EXR、Backfill EXR/PNG、OBJ、Scene GLB、2048 PNG 出力
+- Depth EXR、Initial Depth EXR、World Position EXR、Backfill EXR/PNG、OBJ+Texture ZIP、Scene GLB、2048 PNG 出力
 - 連続処理時に ONNX Runtime session へ並列 `run()` が入らないための排他ガード
 
 ## 現在の既定値
