@@ -126,12 +126,9 @@ const Viewer = (function () {
         const positions = geometry.attributes.position.array;
         const geometryUVs = geometry.attributes.uv.array;
 
-        // EdgeSnap がランプ画素を台地へ吸着した場合、UV も吸着元画素のものへ
-        // 差し替える（テクスチャは不変のまま中間色を消す）。グリッドが point map と
-        // 1:1 のときのみ適用できる。
-        const uvSrcIndex = currentViewerOptions.uvSrcIndex || null;
-        const applyUVSnap = !!uvSrcIndex && meshWidth === width && meshHeight === height;
-
+        // 色の UV は常に元画像のまま（深度のみ EdgeSnap でスナップ）。
+        // UV も吸着元へ差し替える方式はモデル解像度粒度のブロック/スジが出たため
+        // 廃止（PLAN_EDGE_COLOR.md）。エッジの混色はテクスチャ側に残る。
         for (let i = 0; i < positions.length; i += 3) {
             const vertexIndex = i / 3;
             const row = Math.floor(vertexIndex / meshWidth);
@@ -147,13 +144,6 @@ const Viewer = (function () {
             // and last sample to the outer image edges.
             geometryUVs[vertexIndex * 2] = (srcX + 0.5) / width;
             geometryUVs[vertexIndex * 2 + 1] = 1 - (srcY + 0.5) / height;
-            if (applyUVSnap) {
-                const snapSrc = uvSrcIndex[vertexIndex];
-                if (snapSrc >= 0) {
-                    geometryUVs[vertexIndex * 2] = ((snapSrc % width) + 0.5) / width;
-                    geometryUVs[vertexIndex * 2 + 1] = 1 - ((Math.floor(snapSrc / width)) + 0.5) / height;
-                }
-            }
 
             const x0 = Math.floor(srcX);
             const y0 = Math.floor(srcY);
@@ -372,7 +362,9 @@ const Viewer = (function () {
                 positions[src * 3 + 1] * scale,
                 positions[src * 3 + 2] * scale
             );
-            // UV は延長元（同じプレート側）の角からコピーし、境界の中間色を拾わない
+            // UV は延長元（同じプレート側）の角からコピー。テクスチャは ColorPatch 済み
+            // なので延長面は自分側の純色になる（複製元の UV のままだと、延長面が
+            // 相手側の色を拾ってフリンジになる。PLAN_EDGE_COLOR.md 3.6）
             extraUV.push(uvs[ref * 2], uvs[ref * 2 + 1]);
             return index;
         }

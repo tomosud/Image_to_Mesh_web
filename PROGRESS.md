@@ -11,6 +11,7 @@
 1. `js/inference.js`: MoGe-2 ONNX 推論。ViT-S / ViT-B / ViT-L、`num_tokens`、WebGPU → WASM フォールバック、Cache API に対応。
 2. `js/moge_post.js`: point map から focal/shift を復元し、正規化 intrinsics、metric depth、camera-space point map、二値 mask を生成。
 2a. `MogePost.fillBackdrop`: Sky Backdrop モード時、mask 除去画素を最奥の一定Z平面へ再投影して埋め戻す。
+2c. `js/colorpatch.js`: エッジ混色帯を元画像解像度で「自分側の台地の色」に埋め直したテクスチャを生成（UVは元のまま）。表示と backfill の色入力に使用（PLAN_EDGE_COLOR.md）。
 2b. `js/edgesnap.js`: 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去、画素削除なし）。吸着元 index を UV 差し替えに渡す。Edge Threshold が検出しきい値、Snap Width が伝播上限。
 3. `js/worldpos.js`: camera-space `(X right, Y down, Z forward)` を Y-up の `(-X, -Y, Z)` へ変換し、表示スケールと mask を適用。
 4. `js/backfill.js`: エッジ切断で生じた穴を、奥側エッジのみから深度（disparity平面フィット+ラプラス平滑化）と色（プルプッシュ+拡散）で伸長し、第2レイヤー（world position + テクスチャ）を生成（PLAN_INPAINT.md）。

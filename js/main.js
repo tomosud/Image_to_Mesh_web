@@ -10,6 +10,7 @@
     let currentBaseName = 'mesh';
     let currentNormalMap = null;   // tangent-space RGBA8 normal map
     let currentBackfill = null;    // 遮蔽穴インペイントの第2レイヤー（Backfill.generate）
+    let currentPatchedImage = null; // エッジ混色帯をパッチした表示/backfill用画像（ColorPatch）
     let modelReady = false;
     let lastNumTokens = 1800;
     let currentModelKey = 'vitb';
@@ -130,7 +131,8 @@
         }
         currentPost.cleanedMask = cleanedMask;
         // 深度エッジのランプ画素を両側の台地へ吸着（中間値の除去）。
-        // 吸着元 index は viewer が UV 差し替えに使う。
+        // uvSrcIndex（吸着元 index）は現在未使用（UV差し替えは廃止、
+        // PLAN_EDGE_COLOR.md。将来の色パッチ用に配線は残す）。
         let uvSrcIndex = null;
         if (opts.edgeThreshold < 1) {
             const snap = EdgeSnap.process({
@@ -160,7 +162,21 @@
             currentPost.height,
             cleanedMask
         );
-        const colorTex = colorTexFromImageData(currentImageData);
+        // エッジ混色帯のテクスチャ色パッチ（PLAN_EDGE_COLOR.md A案）。
+        // UV は元のまま、混色帯だけを各側の台地色で埋めた画像を表示/backfill に使う。
+        // Original ダウンロードは原本ファイルのまま。
+        currentPatchedImage = null;
+        if (opts.edgeThreshold < 1) {
+            currentPatchedImage = ColorPatch.apply({
+                image: currentImageData,
+                depth: currentPost.depth,
+                validMask: cleanedMask,
+                srcRoot: uvSrcIndex,
+                width: currentPost.width,
+                height: currentPost.height
+            });
+        }
+        const colorTex = colorTexFromImageData(currentPatchedImage || currentImageData);
         Viewer.setData(
             currentWP.data,
             currentWP.width,
@@ -194,7 +210,8 @@
                 validMask: cleaned,
                 holeMask,
                 intrinsics: currentPost.intrinsics,
-                color: currentImageData,
+                // パッチ済み画像を使う: エッジの混色（手前色）が種に入らない
+                color: currentPatchedImage || currentImageData,
                 width,
                 height
             }, { marginPx: parseInt($('fillMargin').value, 10) });
