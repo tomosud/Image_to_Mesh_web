@@ -89,7 +89,7 @@ Controls the internal inference resolution.
 Controls detection of sharp depth discontinuities. Instead of deleting geometry, the soft ramp pixels around each detected edge are snapped to the surfaces on both sides (removing in-between depth values and colors), and the mesh is split at the edge. Both sides extend one cell across the seam, so no hole opens in the front view.
 
 - Range: `0.005`–`1.000`
-- Default: `0.220`
+- Default: `0.045`
 - Lower values detect and split more edges
 - Higher values keep more surfaces connected but may leave stretched geometry
 - `1.000` displays as `Off` and disables edge snapping and splitting
@@ -103,7 +103,7 @@ If surfaces that belong together get split apart, raise the value. If long stret
 Maximum width (in pixels) of the soft depth ramp that is snapped to the neighboring surfaces at a depth edge.
 
 - Range: `1`–`32`
-- Default: `8`
+- Default: `4`
 - Increase if wide or blurred edges still leave stretched geometry
 
 ### Apply Mask
