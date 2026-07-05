@@ -70,6 +70,8 @@ Camera navigation follows Maya-style mouse chords:
 - `Alt + Middle drag`: pan/track
 - `Alt + Right drag`: slow dolly
 - Mouse wheel: slow dolly
+- `W/A/S/D`: parallel move relative to the current view
+- `Shift` / `Ctrl`: parallel move up / down
 
 ## Inference and Geometry Settings
 
@@ -172,6 +174,8 @@ Removes isolated connected face islands after depth-edge cutting.
 - **No Color**: hide the source-image color
 - **Wireframe**: show mesh triangle edges
 - **Reset View**: restore the estimated source-camera view
+- **Set Orbit Center** or `F`: click a visible mesh point to make it the orbit target while preserving the current viewing angle
+- **W/A/S/D** and **Shift/Ctrl**: keyboard parallel movement
 - **Adjust Horizontal Grid**: set the aligned export plane direction from three points while keeping the initial orbit pivot
 - **Show Capture Frame**: preview the square PNG export region
 - **UI OFF / UI ON**: hide or restore interface panels

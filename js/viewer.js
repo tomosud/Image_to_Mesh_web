@@ -23,9 +23,12 @@ const Viewer = (function () {
     let orbitPlanePoints = [];
     let orbitPlaneSelectionActive = false;
     let orbitPlaneAdjustmentOpen = false;
+    let orbitCenterSelectionActive = false;
     let activeOrbitPlane = null;
     let pendingOrbitPlane = null;
     let pointerDownPosition = null;
+    const movementKeys = new Set();
+    let lastFrameTime = 0;
 
     let isWireframeMode = false;
     let isPointsMode = false;
@@ -67,9 +70,9 @@ const Viewer = (function () {
         canvas.addEventListener('contextmenu', (event) => event.preventDefault());
         canvas.addEventListener('pointerdown', onSelectionPointerDown);
         canvas.addEventListener('pointerup', onSelectionPointerUp);
-        window.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && orbitPlaneAdjustmentOpen) cancelOrbitPlaneAdjustment(true);
-        });
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+        window.addEventListener('blur', () => movementKeys.clear());
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.6));
         const d1 = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -86,6 +89,7 @@ const Viewer = (function () {
 
     function animate() {
         requestAnimationFrame(animate);
+        updateKeyboardMovement();
         if (controls) controls.update();
         if (renderer) renderer.render(scene, camera);
     }
@@ -94,6 +98,88 @@ const Viewer = (function () {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function isTypingTarget() {
+        const el = document.activeElement;
+        return el && (
+            el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
+        );
+    }
+
+    function onKeyDown(event) {
+        if (event.key === 'Escape') {
+            if (orbitCenterSelectionActive) cancelOrbitCenterSelection();
+            if (orbitPlaneAdjustmentOpen) cancelOrbitPlaneAdjustment(true);
+            movementKeys.clear();
+            return;
+        }
+
+        if ((event.key === 'f' || event.key === 'F') && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+            if (!isTypingTarget()) {
+                event.preventDefault();
+                toggleOrbitCenterSelection();
+            }
+            return;
+        }
+
+        if (isTypingTarget() || event.altKey || event.metaKey) return;
+        const key = normalizeMovementKey(event);
+        if (!key) return;
+        event.preventDefault();
+        movementKeys.add(key);
+    }
+
+    function onKeyUp(event) {
+        const key = normalizeMovementKey(event);
+        if (key) movementKeys.delete(key);
+    }
+
+    function normalizeMovementKey(event) {
+        if (event.code === 'KeyW') return 'w';
+        if (event.code === 'KeyA') return 'a';
+        if (event.code === 'KeyS') return 's';
+        if (event.code === 'KeyD') return 'd';
+        if (event.key === 'Shift') return 'up';
+        if (event.key === 'Control') return 'down';
+        return null;
+    }
+
+    function updateKeyboardMovement() {
+        const now = performance.now();
+        if (!lastFrameTime) { lastFrameTime = now; return; }
+        const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
+        lastFrameTime = now;
+        if (!movementKeys.size || !camera || !controls) return;
+        if (isTypingTarget()) { movementKeys.clear(); return; }
+
+        const move = new THREE.Vector3();
+        const viewDir = controls.target.clone().sub(camera.position);
+        const distance = Math.max(viewDir.length(), 1e-3);
+        viewDir.normalize();
+        const right = new THREE.Vector3().crossVectors(viewDir, camera.up);
+        if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
+        else right.normalize();
+        const forward = viewDir.clone().addScaledVector(camera.up, -viewDir.dot(camera.up));
+        if (forward.lengthSq() < 1e-8) forward.copy(viewDir);
+        forward.normalize();
+        const up = camera.up.clone().normalize();
+
+        if (movementKeys.has('w')) move.add(forward);
+        if (movementKeys.has('s')) move.sub(forward);
+        if (movementKeys.has('d')) move.add(right);
+        if (movementKeys.has('a')) move.sub(right);
+        if (movementKeys.has('up')) move.add(up);
+        if (movementKeys.has('down')) move.sub(up);
+        if (move.lengthSq() === 0) return;
+
+        move.normalize();
+        const sceneStep = Math.max(getSceneDiagonal() * 0.25, 1e-3);
+        const distanceStep = distance * 0.75;
+        const speed = Math.max(Math.min(sceneStep, distanceStep), 1e-3) * 0.2;
+        move.multiplyScalar(speed * dt);
+        camera.position.add(move);
+        controls.target.add(move);
     }
 
     // 外部から推論結果を受け取る
@@ -788,6 +874,7 @@ const Viewer = (function () {
         );
 
         cancelOrbitPlaneAdjustment(true);
+        cancelOrbitCenterSelection();
         const resetTarget = activeOrbitPlane
             ? activeOrbitPlane.center.clone()
             : getInitialOrbitCenter(bounds);
@@ -833,6 +920,50 @@ const Viewer = (function () {
         controls.update();
     }
 
+    // ---- Orbit center one-click selection ----
+    function toggleOrbitCenterSelection() {
+        if (!mesh && !pointsMesh) return;
+        if (orbitCenterSelectionActive) {
+            cancelOrbitCenterSelection();
+            return;
+        }
+        if (orbitPlaneAdjustmentOpen) cancelOrbitPlaneAdjustment(true);
+        orbitCenterSelectionActive = true;
+        pointerDownPosition = null;
+        if (renderer) renderer.domElement.classList.add('selecting-orbit-center');
+        updateOrbitCenterUI('Click a surface point for the orbit center. Press F or Esc to cancel.', true);
+    }
+
+    function cancelOrbitCenterSelection() {
+        orbitCenterSelectionActive = false;
+        pointerDownPosition = null;
+        if (renderer) renderer.domElement.classList.remove('selecting-orbit-center');
+        updateOrbitCenterUI('', false);
+    }
+
+    function updateOrbitCenterUI(message, active) {
+        const button = document.getElementById('setOrbitCenter');
+        const status = document.getElementById('orbitCenterStatus');
+        if (button) {
+            button.textContent = active ? 'Cancel Orbit Center' : 'Set Orbit Center';
+            button.classList.toggle('active', active);
+        }
+        if (status) status.textContent = message;
+    }
+
+    function applyOrbitCenter(point) {
+        if (!controls || !camera) return;
+        const viewDir = controls.target.clone().sub(camera.position);
+        if (viewDir.lengthSq() < 1e-8) viewDir.copy(point).sub(camera.position);
+        if (viewDir.lengthSq() < 1e-8) return;
+        viewDir.normalize();
+        const distance = Math.max(camera.position.distanceTo(point), 1e-4);
+        controls.target.copy(point);
+        camera.position.copy(point).addScaledVector(viewDir, -distance);
+        camera.lookAt(point);
+        controls.update();
+    }
+
     function hasValidIntrinsics(value) {
         return value && Number.isFinite(value.fx) && value.fx > 0 &&
             Number.isFinite(value.fy) && value.fy > 0;
@@ -841,6 +972,7 @@ const Viewer = (function () {
     // ---- 3-point orbit plane calibration ----
     function toggleHorizontalGridAdjustment() {
         if (!mesh && !pointsMesh) return;
+        if (orbitCenterSelectionActive) cancelOrbitCenterSelection();
         if (orbitPlaneAdjustmentOpen) {
             cancelOrbitPlaneAdjustment(true);
             return;
@@ -918,19 +1050,45 @@ const Viewer = (function () {
     }
 
     function onSelectionPointerDown(event) {
-        if (!orbitPlaneSelectionActive || event.button !== 0) return;
+        if ((!orbitPlaneSelectionActive && !orbitCenterSelectionActive) || event.button !== 0) return;
         pointerDownPosition = { x: event.clientX, y: event.clientY };
     }
 
     function onSelectionPointerUp(event) {
-        if (!orbitPlaneSelectionActive || event.button !== 0 || !pointerDownPosition) return;
+        if ((!orbitPlaneSelectionActive && !orbitCenterSelectionActive) || event.button !== 0 || !pointerDownPosition) return;
         const dx = event.clientX - pointerDownPosition.x;
         const dy = event.clientY - pointerDownPosition.y;
         pointerDownPosition = null;
         if (dx * dx + dy * dy > 16) return;
 
+        const point = pickSurfacePoint(event);
+        if (orbitCenterSelectionActive) {
+            if (!point) {
+                updateOrbitCenterUI('No surface at that position. Click a visible mesh point.', true);
+                return;
+            }
+            applyOrbitCenter(point);
+            cancelOrbitCenterSelection();
+            return;
+        }
+
+        if (!point) {
+            updateOrbitPlaneUI(`No surface at that position (${orbitPlanePoints.length + 1}/3).`, true, false);
+            return;
+        }
+
+        orbitPlanePoints.push(point);
+        addSelectionMarker(point, orbitPlanePoints.length - 1);
+        if (orbitPlanePoints.length < 3) {
+            updateOrbitPlaneUI(`Select a point on the horizontal plane (${orbitPlanePoints.length + 1}/3).`, true, false);
+            return;
+        }
+        previewOrbitPlane();
+    }
+
+    function pickSurfacePoint(event) {
         const target = isPointsMode ? pointsMesh : mesh;
-        if (!target) return;
+        if (!target) return null;
         const rect = renderer.domElement.getBoundingClientRect();
         pointerNdc.set(
             ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -947,19 +1105,7 @@ const Viewer = (function () {
             raycaster.params.Points.threshold = Math.max(diagonal * 0.005, 1e-4);
         }
         const hits = raycaster.intersectObject(target, false);
-        if (!hits.length) {
-            updateOrbitPlaneUI(`No surface at that position (${orbitPlanePoints.length + 1}/3).`, true, false);
-            return;
-        }
-
-        const point = hits[0].point.clone();
-        orbitPlanePoints.push(point);
-        addSelectionMarker(point, orbitPlanePoints.length - 1);
-        if (orbitPlanePoints.length < 3) {
-            updateOrbitPlaneUI(`Select a point on the horizontal plane (${orbitPlanePoints.length + 1}/3).`, true, false);
-            return;
-        }
-        previewOrbitPlane();
+        return hits.length ? hits[0].point.clone() : null;
     }
 
     function addSelectionMarker(point, index) {
@@ -1587,7 +1733,7 @@ const Viewer = (function () {
     }
 
     return {
-        init, setData, setBackfillLayer, setBackfillParallaxCutK, resetCamera,
+        init, setData, setBackfillLayer, setBackfillParallaxCutK, resetCamera, toggleOrbitCenterSelection,
         toggleHorizontalGridAdjustment, useHorizontalGrid,
         setPointsMode, setPointSize, toggleWireframe,
         setLighting, setColorDisabled, isPoints,

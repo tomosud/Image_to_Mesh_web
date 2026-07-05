@@ -314,7 +314,8 @@ button:disabled {
     margin-bottom: 15px;
 }
 
-#adjustHorizontalGrid.active {
+#adjustHorizontalGrid.active,
+#setOrbitCenter.active {
     border-color: var(--accent);
     background: rgba(102, 126, 234, 0.35);
 }
@@ -335,7 +336,8 @@ button:disabled {
     display: none;
 }
 
-#canvas.selecting-orbit-plane {
+#canvas.selecting-orbit-plane,
+#canvas.selecting-orbit-center {
     cursor: crosshair;
 }
 

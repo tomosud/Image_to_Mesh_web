@@ -530,6 +530,7 @@
         });
         $('disableColor').addEventListener('change', (e) => Viewer.setColorDisabled(e.target.checked));
         $('resetView').addEventListener('click', Viewer.resetCamera);
+        $('setOrbitCenter').addEventListener('click', Viewer.toggleOrbitCenterSelection);
         $('adjustHorizontalGrid').addEventListener('click', Viewer.toggleHorizontalGridAdjustment);
         $('useHorizontalGrid').addEventListener('click', Viewer.useHorizontalGrid);
 

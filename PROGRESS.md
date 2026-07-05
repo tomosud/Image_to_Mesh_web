@@ -21,8 +21,8 @@
 - ColorPatch によるエッジ混色帯の表示/backfill 用テクスチャ補正
 - Y-up world position 生成、メッシュ / 点群 / ワイヤーフレーム / Unlit / No Color 表示
 - Adjust Horizontal Grid は aligned export 用の地平方向だけを設定し、scene origin / grid 表示位置 / orbit pivot は初期ターゲットに固定する
-- Reset View は推定ソースカメラ位置・上方向・初期ターゲットへ戻す。grid 設定後も中心は変えない
-- カメラ操作は Maya 風の `Alt+左=orbit` / `Alt+中=pan` / `Alt+右=dolly`。dolly は低速化
+- Set Orbit Center / `F` でクリックした表示面を一時的な回転中心にできる。Reset View で推定ソースカメラ位置・上方向・初期ターゲットへ戻す
+- カメラ操作は Maya 風の `Alt+左=orbit` / `Alt+中=pan` / `Alt+右=dolly`。`W/A/S/D` でビュー基準の平行移動、`Shift/Ctrl` で上下平行移動。dolly は低速化
 - カメラ情報が変わらない後処理パラメータ変更では、現在のビューを維持したままメッシュだけ更新
 - depth 段差セルの near/far 2枚プレート分割と各1セル延長
 - 奥側エッジ由来の Backfill 第2レイヤー
