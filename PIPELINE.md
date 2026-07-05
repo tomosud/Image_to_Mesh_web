@@ -123,7 +123,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
     片側に押し込まれてプレート内部に段差が残る。この場合そのプレート側は張らず（実在角の
     深度スパンが `0.10` を超えたら skip）、中間を跨ぐスパイクを防ぐ。欠けた1セルは backfill が埋める
 - NaN を含むセルだけ面を張らない
-- 分割・カット後、**面数 `64` 未満の孤立連結成分を除去**する（`removeSmallFaceComponents`）。
+- 分割・カット後、**Small Component Faces 未満の孤立連結成分を除去**する（`removeSmallFaceComponents`、既定 `64`）。
   三重点カットや NaN で切り離された小さい/細いポリ（フリンジのちぎれ等）を消す。除去面は
   透明になり再充填しない。巨大な連結面（本体）は残る
 
@@ -158,7 +158,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
   ので繋がり奥穴を埋め、手前を含む面は disparity 差が大きい（視差大）ので切れて奥から手前へ
   伸びる smear を除去する。しきい値 = シーン中央値 disparity × `PARALLAX_K`（=0.5、スケール不変）。
   上げる→切りにくい（黒穴減・smear 増）／下げる→切りやすい（smear 減・黒穴増）
-- 視差カット後、面数 `64` 未満の孤立連結成分を除去する（`removeSmallFaceComponents`、主メッシュと共通）。
+- 視差カット後、Small Component Faces 未満の孤立連結成分を除去する（`removeSmallFaceComponents`、主メッシュと共通、既定 `64`）。
   カットで切り離された細い fill 片（面張りの元）を消す
 
 ---
@@ -188,12 +188,14 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 | Treat 0 depth as invalid / Invalid Depth Value | 2 |
 | Edge Threshold | 6（`1.000`=Off で 6/7 と 9 の depth seam split を無効化） |
 | Snap Width | 6（吸着の伝播上限。超えた分は元 depth のまま） |
+| Small Component Faces | 9, 10 |
 | Sky / Masked Area | 3, 4, 5 |
 | Fill Occlusion / Fill Margin | 10 |
 
-固定しきい値（UIと非連動）:
+固定しきい値 / UI既定値:
 
 - mesh seam split: relative depth jump `0.10`
+- Fill Margin UI: original image long edge percentage, default `25%`; converted to processing-grid `marginPx` before `Backfill.generate`
 - backfill 種検出: relative depth jump `0.10`
 - ColorPatch 帯・側判定: relative depth jump `0.10`
 - SkyMaskColorFill 内周幅: `4px`

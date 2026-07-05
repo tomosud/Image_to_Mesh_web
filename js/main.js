@@ -105,7 +105,8 @@
             // 'remove': mask 領域を除去する（穴になる）
             maskMode: $('maskMode').value,
             edgeThreshold: parseFloat($('edgeThreshold').value),
-            snapWidth: parseInt($('snapWidth').value, 10)
+            snapWidth: parseInt($('snapWidth').value, 10),
+            smallComponentMinFaces: getSmallComponentMinFaces()
         };
     }
 
@@ -263,6 +264,7 @@
                 {
                     disableDepthEdgeCleanup: opts.edgeThreshold >= 1,
                     uvSrcIndex,
+                    smallComponentMinFaces: opts.smallComponentMinFaces,
                     preserveCamera: !fromProcessImage
                 },
                 currentNormalMap
@@ -290,10 +292,35 @@
         recompute(true).catch(handleAsyncError);
     }
 
+    function getFillMarginPercent() {
+        return parseFloat($('fillMargin').value);
+    }
+
+    function getSmallComponentMinFaces() {
+        const value = parseInt($('smallComponentFaces').value, 10);
+        return Number.isFinite(value) ? Math.max(0, value) : 64;
+    }
+
+    function getBackfillMarginPx() {
+        const percent = getFillMarginPercent();
+        if (!currentImageData || !currentPost) return Math.max(1, Math.round(percent));
+        const sourceLong = Math.max(currentImageData.width, currentImageData.height);
+        const processLong = Math.max(currentPost.width, currentPost.height);
+        const sourcePx = sourceLong * percent / 100;
+        return Math.max(1, Math.round(sourcePx * processLong / sourceLong));
+    }
+
+    function updateFillMarginLabel() {
+        const percent = getFillMarginPercent();
+        const px = currentImageData && currentPost ? ` (${getBackfillMarginPx()}px)` : '';
+        $('fillMarginValue').textContent = `${percent.toFixed(1)}%${px}`;
+    }
+
     // 遮蔽穴インペイント（backfill.js）。推論・主レイヤーは再計算しない軽量パス。
     function updateBackfill() {
         if (!currentPost || !currentImageData) return;
         currentBackfill = null;
+        updateFillMarginLabel();
         if ($('fillOcclusion').checked) {
             const { depth, width, height } = currentPost;
             const cleaned = currentPost.cleanedMask;
@@ -313,7 +340,7 @@
                 color: currentPatchedImage || currentImageData,
                 width,
                 height
-            }, { marginPx: parseInt($('fillMargin').value, 10) });
+            }, { marginPx: getBackfillMarginPx() });
         }
         Viewer.setBackfillLayer(currentBackfill);
         $('dlBackfillWP').disabled = !currentBackfill;
@@ -479,10 +506,11 @@
             $('snapWidthValue').textContent = e.target.value;
         });
         $('snapWidth').addEventListener('change', requestRecompute);
+        $('smallComponentFaces').addEventListener('change', requestRecompute);
         $('maskMode').addEventListener('change', requestRecompute);
         $('fillOcclusion').addEventListener('change', updateBackfill);
         $('fillMargin').addEventListener('input', (e) => {
-            $('fillMarginValue').textContent = e.target.value;
+            updateFillMarginLabel();
         });
         $('fillMargin').addEventListener('change', updateBackfill);
         $('recompute').addEventListener('click', () => {
@@ -537,6 +565,7 @@
         $('exportPNG').addEventListener('click', Viewer.exportPNG);
 
         updateDepthUpsampleLabels();
+        updateFillMarginLabel();
         [
             'depthUpsampleEnable',
             'depthInitialMode',

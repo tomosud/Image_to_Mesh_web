@@ -139,6 +139,25 @@ MoGe-2 marks sky, transparent/reflective surfaces, and uncertain regions as inva
 
 Invalid or non-positive depth values still cannot form geometry in the OFF mode.
 
+### Fill Occlusion
+
+Backfill creates a second background layer behind depth-edge silhouettes.
+
+- **Fill Margin** is measured as a percentage of the original image long edge
+- Range: `0.5%` to `50%`
+- Default: `25%`
+- The UI also shows the equivalent processing-grid pixel distance in parentheses after an image is loaded
+- Increasing the value extends both the backfill mesh area and its generated texture farther behind foreground silhouettes
+
+### Small Component Faces
+
+Removes isolated connected face islands after depth-edge cutting.
+
+- Default: `64` faces
+- Applies to both the main mesh and the backfill mesh
+- Set `0` to keep all isolated islands
+- Higher values remove larger detached fragments
+
 ## Display Controls
 
 - **Points Only**: switch between triangle mesh and point cloud

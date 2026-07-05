@@ -38,7 +38,9 @@
 - Initial Depth Resize: `Bilinear`
 - Edge Threshold: `0.010`
 - Snap Width: `8`
+- Small Component Faces: `64`
 - Sky / Masked Area: Sky Backdrop
+- Fill Margin: `25%` of original image long edge
 - SkyMaskColorFill inner ring: `4px`
 
 ## 要実機確認

@@ -174,6 +174,11 @@
                     <div class="control-help">Each pass lets a stable near/far depth area claim adjacent marked edge pixels. Higher values can clean thicker detected ramps; pixels not reached within this limit keep their original depth.</div>
                 </div>
                 <div class="control-group">
+                    <label>Small Component Faces <span class="help-tip" tabindex="0" role="note" data-tooltip="Removes isolated mesh or backfill face islands smaller than this face count after depth-edge cutting. Set 0 to keep all islands." aria-label="Small Component Faces help">?</span></label>
+                    <input type="number" id="smallComponentFaces" min="0" step="1" value="64">
+                    <div class="control-help">Applies to both the main mesh and backfill mesh. Higher values remove larger isolated fragments.</div>
+                </div>
+                <div class="control-group">
                     <label>Sky / Masked Area <span class="help-tip" tabindex="0" role="note" data-tooltip="MoGe-2 marks sky and uncertain regions as invalid. Sky Backdrop keeps those pixels and places them on a flat plane far behind the scene (2x the deepest valid point, at least 100m). Apply Mask OFF trusts the model's raw depth there instead. Apply Mask ON removes those regions, leaving holes." aria-label="Sky / Masked Area help">?</span></label>
                     <select id="maskMode">
                         <option value="sky" selected>Sky Backdrop — keep sky as a far plane</option>
@@ -191,9 +196,9 @@
                     </div>
                 </div>
                 <div class="control-group">
-                    <label>Fill Margin (px): <span id="fillMarginValue">128</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="How far the background layer extends behind foreground silhouettes. Larger values tolerate more camera movement but extrapolate more." aria-label="Fill Margin help">?</span></label>
+                    <label>Fill Margin (% long edge): <span id="fillMarginValue">25.0%</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="How far the background layer extends behind foreground silhouettes, measured as a percentage of the original image long edge. Larger values tolerate more camera movement but extrapolate more." aria-label="Fill Margin help">?</span></label>
                     <div class="slider-container">
-                        <input type="range" id="fillMargin" min="8" max="128" step="4" value="128">
+                        <input type="range" id="fillMargin" min="0.5" max="50" step="0.5" value="25">
                     </div>
                 </div>
                 <div class="control-group dl-group">
@@ -259,9 +264,9 @@
     <script src="js/worldpos.js?v=20260620-13"></script>
     <script src="js/normalmap.js?v=20260620-13"></script>
     <script src="js/backfill.js?v=20260705-5"></script>
-    <script src="js/viewer.js?v=20260705-15"></script>
+    <script src="js/viewer.js?v=20260705-16"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260705-1"></script>
-    <script src="js/main.js?v=20260705-9"></script>
+    <script src="js/main.js?v=20260705-11"></script>
 </body>
 </html>

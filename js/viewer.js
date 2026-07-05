@@ -179,7 +179,7 @@ const Viewer = (function () {
             !currentViewerOptions.disableDepthEdgeCleanup
         );
         // 段差カットで孤立した小さい/細いポリ（フリンジのちぎれ等）を除去する
-        removeSmallFaceComponents(geometry, 64);
+        removeSmallFaceComponents(geometry, getSmallComponentMinFaces());
         // シーム分割で頂点が追加されると attribute 配列が差し替わる
         const finalPositions = geometry.attributes.position.array;
         updateFiniteGeometryBounds(geometry, finalPositions);
@@ -310,7 +310,7 @@ const Viewer = (function () {
         }
         removeInvalidAndDiscontinuousFaces(geometry, positions, true, dispGapThreshold);
         // 視差カットで孤立した小さい/細い fill 片（面張りの元）を除去する
-        removeSmallFaceComponents(geometry, 64);
+        removeSmallFaceComponents(geometry, getSmallComponentMinFaces());
         if (!geometry.index || geometry.index.count === 0) { geometry.dispose(); return; }
         updateFiniteGeometryBounds(geometry, positions);
         geometry.computeVertexNormals();
@@ -557,6 +557,11 @@ const Viewer = (function () {
             } else removed++;
         }
         if (removed > 0) geometry.setIndex(kept);
+    }
+
+    function getSmallComponentMinFaces() {
+        const value = currentViewerOptions && Number(currentViewerOptions.smallComponentMinFaces);
+        return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 64;
     }
 
     // Masked vertices remain NaN so exports and point mode preserve invalid
