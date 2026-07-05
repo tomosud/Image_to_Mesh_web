@@ -127,22 +127,23 @@ body.ui-hidden #toggleUI:hover {
 }
 
 #controls {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    z-index: 1000;
-    display: none;
-}
-
-#sidePanel {
-    /* 右下だと縦に長くなったとき下端が画面外に出て触れないため左側へ移動。
-       meshInfo(左上)の下に置き、収まらない分はパネル内スクロール。 */
+    /* 表示系の小パネルは左側（meshInfo の下） */
     position: absolute;
     top: 150px;
     left: 20px;
     z-index: 1000;
     display: none;
-    max-height: calc(100vh - 240px);
+}
+
+#sidePanel {
+    /* 設定/DLの大パネルは右上。縦に長くなって下端が画面外に出ても
+       触れるように、収まらない分はパネル内スクロール。 */
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: none;
+    max-height: calc(100vh - 40px);
     overflow-y: auto;
 }
 
