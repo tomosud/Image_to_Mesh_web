@@ -127,9 +127,9 @@ body.ui-hidden #toggleUI:hover {
 }
 
 #controls {
-    /* 表示系の小パネルは左側（meshInfo の下） */
+    /* 表示系の小パネルは左側（meshInfo の下、重ならない位置） */
     position: absolute;
-    top: 150px;
+    top: 210px;
     left: 20px;
     z-index: 1000;
     display: none;
