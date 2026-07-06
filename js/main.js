@@ -373,9 +373,21 @@
             for (let i = 0; i < holeMask.length; i++) {
                 holeMask[i] = cleaned[i] ? 0 : 1;
             }
+            // Small Component Faces で主メッシュから消えた画素は fill 対象から外す（A案）。
+            // validMask=0（種にもしない）かつ holeMask=0（穴としても埋めない）の死んだ画素に
+            // することで、消えた島に fill 面を張って繋ぐのを防ぐ。解像度が一致する時のみ適用。
+            let validMask = cleaned;
+            const removedInfo = Viewer.getSmallComponentRemovedPixels();
+            if (removedInfo && removedInfo.width === width && removedInfo.height === height) {
+                const removed = removedInfo.mask;
+                validMask = new Uint8Array(cleaned);
+                for (let i = 0; i < removed.length; i++) {
+                    if (removed[i]) { validMask[i] = 0; holeMask[i] = 0; }
+                }
+            }
             currentBackfill = Backfill.generate({
                 depth,
-                validMask: cleaned,
+                validMask,
                 holeMask,
                 intrinsics: currentPost.intrinsics,
                 // パッチ済み画像を使う: エッジの混色（手前色）が種に入らない

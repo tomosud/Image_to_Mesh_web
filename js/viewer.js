@@ -10,6 +10,8 @@ const Viewer = (function () {
     let currentNormalTexture = null;  // { data: Uint8Array RGBA, width, height }
     let currentNormalTextureObject = null;
     let currentBackfillLayer = null;  // Backfill.generate() の戻り値
+    // 直近 createMesh で Small Component 除去された元画素 { mask: Uint8Array, width, height } | null
+    let lastSmallComponentRemoval = null;
     let backfillMesh = null;          // THREE.Mesh | THREE.Points
     let backfillTextureObject = null;
     let backfillParallaxCutK = 0.5;
@@ -259,7 +261,7 @@ const Viewer = (function () {
         }
 
         geometry.attributes.position.needsUpdate = true;
-        splitDiscontinuousFaces(
+        const dupSrcPixel = splitDiscontinuousFaces(
             geometry,
             meshWidth,
             meshHeight,
@@ -267,7 +269,15 @@ const Viewer = (function () {
         );
         // 段差カットで孤立した小さい/細いポリ（フリンジのちぎれ等）を除去する
         erodeBoundaryFaces(geometry, 1);
-        removeSmallFaceComponents(geometry, getSmallComponentMinFaces());
+        // Small Component で消えた元画素を記録し、backfill の fill 対象から外す（節: A案）。
+        const removedPixels = removeSmallFaceComponents(
+            geometry,
+            getSmallComponentMinFaces(),
+            { baseCount: meshWidth * meshHeight, dupSrcPixel }
+        );
+        lastSmallComponentRemoval = removedPixels
+            ? { mask: removedPixels, width: meshWidth, height: meshHeight }
+            : null;
         // シーム分割で頂点が追加されると attribute 配列が差し替わる
         const finalPositions = geometry.attributes.position.array;
         updateFiniteGeometryBounds(geometry, finalPositions);
@@ -321,6 +331,12 @@ const Viewer = (function () {
     }
 
     // ---- 遮蔽穴インペイントの第2レイヤー（backfill.js の出力）----
+    // main.js が backfill 生成時に参照する。Small Component で消えた元画素を
+    // fill 対象から外すためのマスク（無ければ null）。解像度は主メッシュ準拠。
+    function getSmallComponentRemovedPixels() {
+        return lastSmallComponentRemoval;
+    }
+
     function setBackfillLayer(layer) {
         currentBackfillLayer = layer || null;
         if (backfillTextureObject) { backfillTextureObject.dispose(); backfillTextureObject = null; }
@@ -467,14 +483,17 @@ const Viewer = (function () {
     //   奥面が続いて見える）の両方が所有する。
     // 複製頂点は同一画素レイ上の移動なので位置は元頂点の比率スケールで正確。
     // しきい値は従来の面カットと同じ 0.10 固定（Edge Threshold とは非連動）。
+    // 戻り値: 複製頂点（index >= W*H）の元画素 index を並べた配列 extraSrcPixel。
+    // removeSmallFaceComponents が「消えた face の画素」を復元するのに使う。
     function splitDiscontinuousFaces(geometry, W, H, splitDepthEdges) {
-        if (!geometry.index) return;
+        if (!geometry.index) return [];
         const positions = geometry.attributes.position.array;
         const uvs = geometry.attributes.uv.array;
         const relativeDepthThreshold = 0.10;
         const indices = [];
         const extraPos = [];
         const extraUV = [];
+        const extraSrcPixel = [];   // extraSrcPixel[v - baseCount] = 複製元の元画素 index
         const baseCount = W * H;
 
         // セル角の並び: 0=左上 1=右上 2=左下 3=右下
@@ -497,6 +516,8 @@ const Viewer = (function () {
             // なので延長面は自分側の純色になる（複製元の UV のままだと、延長面が
             // 相手側の色を拾ってフリンジになる。docs/archive/PLAN_EDGE_COLOR_HISTORY.md 3.6）
             extraUV.push(uvs[ref * 2], uvs[ref * 2 + 1]);
+            // 複製元の元画素（src は必ず 0..baseCount-1 のグリッド角）を記録
+            extraSrcPixel.push(src);
             return index;
         }
 
@@ -582,6 +603,7 @@ const Viewer = (function () {
             geometry.setAttribute('uv', new THREE.BufferAttribute(newUVs, 2));
         }
         geometry.setIndex(indices);
+        return extraSrcPixel;
     }
 
     // Do not connect masked pixels or surfaces separated by a large depth jump.
@@ -670,11 +692,15 @@ const Viewer = (function () {
     // union-find し、面数が minFaces 未満の成分の面を捨てる。段差カット（視差カット・
     // 三重点・NaN）で切り離された小片や、それを種にした backfill の細い面張りを消す。
     // 巨大な連結面（主メッシュ本体・広い背景）は残る。除去面は透明になり再充填しない。
-    function removeSmallFaceComponents(geometry, minFaces) {
-        if (!geometry.index || minFaces <= 1) return;
+    //
+    // srcMap = { baseCount, dupSrcPixel } を渡すと、除去で「どの kept face にも属さなく
+    // なった元画素」の Uint8Array(baseCount) を返す。backfill 側でその画素を fill 対象から
+    // 外す（validMask=0 かつ holeMask=0 の死んだ画素にする）ために使う。渡さなければ null。
+    function removeSmallFaceComponents(geometry, minFaces, srcMap) {
+        if (!geometry.index || minFaces <= 1) return null;
         const idx = geometry.index.array;
         const nF = idx.length / 3;
-        if (nF === 0) return;
+        if (nF === 0) return null;
         const vCount = geometry.attributes.position.count;
         const parent = new Int32Array(nF);
         for (let f = 0; f < nF; f++) parent[f] = f;
@@ -690,15 +716,41 @@ const Viewer = (function () {
         }
         const size = new Int32Array(nF);
         for (let f = 0; f < nF; f++) size[find(f)]++;
+
+        // 元画素の被覆状況を集計（srcMap 指定時のみ）。ある画素を kept face が1つでも
+        // 使えば「生存」、どの kept にも使われず removed だけが使うなら「除去」。
+        let coveredKept = null, coveredRemoved = null, baseCount = 0, dupSrcPixel = null;
+        if (srcMap) {
+            baseCount = srcMap.baseCount;
+            dupSrcPixel = srcMap.dupSrcPixel || [];
+            coveredKept = new Uint8Array(baseCount);
+            coveredRemoved = new Uint8Array(baseCount);
+        }
+        const srcPixelOf = (v) => (v < baseCount ? v : dupSrcPixel[v - baseCount]);
+
         let removed = 0;
         const kept = [];
         for (let f = 0; f < nF; f++) {
-            if (size[find(f)] >= minFaces) {
-                const b = f * 3;
+            const b = f * 3;
+            const keep = size[find(f)] >= minFaces;
+            if (keep) {
                 kept.push(idx[b], idx[b + 1], idx[b + 2]);
             } else removed++;
+            if (srcMap) {
+                const cover = keep ? coveredKept : coveredRemoved;
+                cover[srcPixelOf(idx[b])] = 1;
+                cover[srcPixelOf(idx[b + 1])] = 1;
+                cover[srcPixelOf(idx[b + 2])] = 1;
+            }
         }
         if (removed > 0) geometry.setIndex(kept);
+
+        if (!srcMap) return null;
+        const removedPixels = new Uint8Array(baseCount);
+        for (let p = 0; p < baseCount; p++) {
+            if (coveredRemoved[p] && !coveredKept[p]) removedPixels[p] = 1;
+        }
+        return removedPixels;
     }
 
     function getSmallComponentMinFaces() {
@@ -1733,7 +1785,8 @@ const Viewer = (function () {
     }
 
     return {
-        init, setData, setBackfillLayer, setBackfillParallaxCutK, resetCamera, toggleOrbitCenterSelection,
+        init, setData, setBackfillLayer, setBackfillParallaxCutK, getSmallComponentRemovedPixels,
+        resetCamera, toggleOrbitCenterSelection,
         toggleHorizontalGridAdjustment, useHorizontalGrid,
         setPointsMode, setPointSize, toggleWireframe,
         setLighting, setColorDisabled, isPoints,

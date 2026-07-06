@@ -59,6 +59,7 @@
 - `Backfill Far Priority`: 通常 BFS 後、近傍内のより奥ラベルが手前寄りラベルを上書きできる局所補正
 - `Backfill Hole Preclaim`: 通常 BFS 前に、全 seed から `holeMask` 内だけへ数px先取り拡張し、競合時はより奥のラベルを優先する処理
 - `viewer.js` では `Small Component Faces` の前に境界 face を1層削るテスト処理 `erodeBoundaryFaces(geometry, 1)` を主メッシュ/backfill メッシュの両方へ入れている
+- **Small Component 除去画素の fill 除外（A案, 2026-07-06）**: 主メッシュで `Small Component Faces` により消えた元画素を `viewer.js` が記録し（`splitDiscontinuousFaces` が複製頂点→元画素を返し、`removeSmallFaceComponents` が「どの kept face にも属さない画素」を導出、`Viewer.getSmallComponentRemovedPixels()` で公開）、`main.js updateBackfill` がその画素を `validMask=0` かつ `holeMask=0` の死んだ画素にする。これで消えた小島に backfill が fill 面を張って繋ぐのを防ぐ。解像度が主メッシュと一致する時のみ適用
 
 現時点の重要な注意:
 
