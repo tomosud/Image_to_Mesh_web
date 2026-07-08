@@ -1362,6 +1362,7 @@ const Viewer = (function () {
         const textureName = `${base}_texture.png`;
         const normalName = currentNormalTexture ? `${base}_normal.png` : null;
         const backfillTextureName = currentBackfillLayer && backfillMesh ? `${base}_backfill_texture.png` : null;
+        const fillBTextureName = currentFillBLayer && fillBMesh ? `${base}_fillb_texture.png` : null;
         const geometry = createCompactExportGeometry(target.geometry);
         if (!geometry || !geometry.index || geometry.index.count === 0) {
             alert('No valid mesh faces are available for OBJ export.');
@@ -1375,17 +1376,29 @@ const Viewer = (function () {
                 backfillGeometry = null;
             }
         }
+        let fillBGeometry = null;
+        if (fillBMesh && currentFillBLayer) {
+            fillBGeometry = createCompactExportGeometry(fillBMesh.geometry);
+            if (!fillBGeometry || !fillBGeometry.index || fillBGeometry.index.count === 0) {
+                if (fillBGeometry) fillBGeometry.dispose();
+                fillBGeometry = null;
+            }
+        }
         const objects = [
             { name: 'AlignedMesh', material: 'image_to_mesh_material', geometry }
         ];
         if (backfillGeometry && backfillTextureName) {
             objects.push({ name: 'BackfillMesh', material: 'backfill_material', geometry: backfillGeometry });
         }
+        if (fillBGeometry && fillBTextureName) {
+            objects.push({ name: 'FillBMesh', material: 'fillb_material', geometry: fillBGeometry });
+        }
         const obj = createOBJText(objects, objName, mtlName);
         const mtl = createMTLText({
             textureName,
             normalName,
-            backfillTextureName: backfillGeometry ? backfillTextureName : null
+            backfillTextureName: backfillGeometry ? backfillTextureName : null,
+            fillBTextureName: fillBGeometry ? fillBTextureName : null
         });
         try {
             const files = [
@@ -1399,6 +1412,9 @@ const Viewer = (function () {
             if (backfillGeometry && currentBackfillLayer && backfillTextureName) {
                 files.push({ name: backfillTextureName, data: await textureToPngBytes(currentBackfillLayer.colorTex) });
             }
+            if (fillBGeometry && currentFillBLayer && fillBTextureName) {
+                files.push({ name: fillBTextureName, data: await textureToPngBytes(currentFillBLayer.colorTex) });
+            }
             const zip = createZip(files);
             downloadBlob(new Blob([zip], { type: 'application/zip' }), `${base}_obj.zip`);
         } catch (error) {
@@ -1407,6 +1423,7 @@ const Viewer = (function () {
         } finally {
             geometry.dispose();
             if (backfillGeometry) backfillGeometry.dispose();
+            if (fillBGeometry) fillBGeometry.dispose();
         }
     }
 
@@ -1462,7 +1479,7 @@ const Viewer = (function () {
         return obj;
     }
 
-    function createMTLText({ textureName, normalName, backfillTextureName }) {
+    function createMTLText({ textureName, normalName, backfillTextureName, fillBTextureName }) {
         let mtl = 'newmtl image_to_mesh_material\n';
         mtl += 'Ka 1 1 1\n';
         mtl += 'Kd 1 1 1\n';
@@ -1483,6 +1500,15 @@ const Viewer = (function () {
             mtl += 'd 1\n';
             mtl += 'illum 2\n';
             mtl += `map_Kd ${backfillTextureName}\n`;
+        }
+        if (fillBTextureName) {
+            mtl += '\nnewmtl fillb_material\n';
+            mtl += 'Ka 1 1 1\n';
+            mtl += 'Kd 1 1 1\n';
+            mtl += 'Ks 0 0 0\n';
+            mtl += 'd 1\n';
+            mtl += 'illum 2\n';
+            mtl += `map_Kd ${fillBTextureName}\n`;
         }
         return mtl;
     }
@@ -1659,6 +1685,26 @@ const Viewer = (function () {
             }
         }
 
+        // 最奥バックドロップ層（FillB）も同じ整列でエクスポート
+        let fillBGeometry = null, fillBMaterial = null, fillBGlbTexture = null;
+        if (fillBMesh && currentFillBLayer) {
+            fillBGeometry = createCompactExportGeometry(fillBMesh.geometry);
+            if (fillBGeometry && fillBGeometry.index && fillBGeometry.index.count > 0) {
+                fillBGlbTexture = createGLBTexture(currentFillBLayer.colorTex, true);
+                fillBMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x000000,
+                    emissive: 0xffffff,
+                    emissiveMap: fillBGlbTexture,
+                    metalness: 1.0,
+                    roughness: 1.0,
+                    side: THREE.DoubleSide
+                });
+                const fillBExportMesh = new THREE.Mesh(fillBGeometry, fillBMaterial);
+                fillBExportMesh.name = 'FillBMesh';
+                exportScene.add(fillBExportMesh);
+            }
+        }
+
         addExportCameras(exportScene);
         const exporter = new THREE.GLTFExporter();
         const cleanup = () => {
@@ -1669,6 +1715,9 @@ const Viewer = (function () {
             if (backfillGeometry) backfillGeometry.dispose();
             if (backfillMaterial) backfillMaterial.dispose();
             if (backfillGlbTexture) backfillGlbTexture.dispose();
+            if (fillBGeometry) fillBGeometry.dispose();
+            if (fillBMaterial) fillBMaterial.dispose();
+            if (fillBGlbTexture) fillBGlbTexture.dispose();
         };
         try {
             exporter.parse(exportScene, (result) => {
