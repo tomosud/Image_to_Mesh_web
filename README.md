@@ -1,6 +1,6 @@
 # Image to Mesh Web
 
-Image to Mesh Web converts a single JPG or PNG image into an interactive 3D mesh using MoGe-2. Inference, geometry processing, viewing, and export run locally in your browser.
+Image to Mesh Web converts a single browser-supported image into an interactive 3D mesh using MoGe-2. Inference, geometry processing, viewing, and export run locally in your browser.
 
 **[Open Image to Mesh Web](https://tomosud.github.io/Image_to_Mesh_web/)**
 
@@ -28,13 +28,13 @@ https://github.com/user-attachments/assets/9ee06a21-c0db-4ef7-a144-4e5478724f1f
 - Current Google Chrome or Microsoft Edge
 - A WebGPU-capable GPU is recommended
 - Internet access for the first model and library download
-- A JPG or PNG input image
+- A browser-supported input image such as JPG, PNG, WebP, AVIF, GIF, or BMP
 
 ViT-L requires substantial GPU and system memory. Use ViT-B or ViT-S if loading or inference fails.
 
 ## Quick Start
 
-1. Drop a JPG or PNG onto the page, or click the drop area.
+1. Drop an image onto the page, or click the drop area.
 2. Wait for the model download and inference to finish.
 3. Inspect the geometry:
 
@@ -184,7 +184,7 @@ Removes isolated connected face islands after depth-edge cutting.
 
 | Button | Output |
 |---|---|
-| Original | Original JPG or PNG file |
+| Original | Original input image file |
 | Depth (EXR) | 32-bit FLOAT camera depth in the `Y` channel |
 | Initial Depth (EXR) | Debug 32-bit FLOAT depth after initial high-resolution resize and before RGB-guided filtering |
 | Normal Map (PNG) | RGB tangent-space normal map generated from MoGe-2 normals |

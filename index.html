@@ -17,7 +17,7 @@
         <div id="dropZone">
             <div id="dropText">Drop an Image</div>
             <div id="dropSubtext">
-                Drop a JPG or PNG image to estimate depth with MoGe-2<br>
+                Drop a JPG, PNG, WebP, AVIF, GIF, or BMP image to estimate depth with MoGe-2<br>
                 and display it as a world-position mesh.<br>
                 <span style="opacity:.8">Click here to select a file</span>
             </div>
@@ -269,7 +269,7 @@
             </div>
         </div>
 
-        <input type="file" id="fileInput" accept=".jpg,.jpeg,.png" />
+        <input type="file" id="fileInput" accept="image/*,.jpg,.jpeg,.png,.webp,.avif,.gif,.bmp" />
     </div>
 
     <!-- Three.js and dependencies -->
@@ -294,6 +294,6 @@
     <script src="js/viewer.js?v=20260708-3"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260705-1"></script>
-    <script src="js/main.js?v=20260708-1"></script>
+    <script src="js/main.js?v=20260709-1"></script>
 </body>
 </html>

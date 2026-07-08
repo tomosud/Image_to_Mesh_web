@@ -19,8 +19,25 @@
     let lastNumTokens = 1800;
     let currentModelKey = 'vitb';
     const MODEL_STORAGE_KEY = 'image-to-mesh:model';
+    const SUPPORTED_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'gif', 'bmp']);
 
     const $ = (id) => document.getElementById(id);
+
+    function getFileExtension(name) {
+        const match = String(name || '').match(/\.([^.\\\/]+)$/);
+        return match ? match[1].toLowerCase() : '';
+    }
+
+    function getImageBaseName(file) {
+        return (file && file.name ? file.name : 'mesh').replace(/\.[^.\\\/]+$/, '') || 'mesh';
+    }
+
+    function isSupportedImageFile(file) {
+        if (!file) return false;
+        const type = String(file.type || '').toLowerCase();
+        if (type.startsWith('image/')) return true;
+        return SUPPORTED_IMAGE_EXTENSIONS.has(getFileExtension(file.name));
+    }
 
     function showLoading(show, text, ratio) {
         const overlay = $('loadingOverlay');
@@ -74,14 +91,24 @@
             reader.onload = (e) => {
                 const img = new Image();
                 img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
-                    resolve(ctx.getImageData(0, 0, img.width, img.height));
+                    try {
+                        const width = img.naturalWidth || img.width;
+                        const height = img.naturalHeight || img.height;
+                        if (!width || !height) {
+                            reject(new Error('The selected image has no readable pixel dimensions.'));
+                            return;
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        resolve(ctx.getImageData(0, 0, width, height));
+                    } catch (err) {
+                        reject(err);
+                    }
                 };
-                img.onerror = reject;
+                img.onerror = () => reject(new Error('The selected image format could not be decoded by this browser.'));
                 img.src = e.target.result;
             };
             reader.onerror = reject;
@@ -424,7 +451,7 @@
         processingImage = true;
         setDownloadEnabled(false);
         currentFile = file;
-        currentBaseName = file.name.replace(/\.(jpg|jpeg|png)$/i, '');
+        currentBaseName = getImageBaseName(file);
 
         try {
             showLoading(true, 'Loading image...');
@@ -509,10 +536,10 @@
         if (!files || files.length === 0) return;
         let imageFile = null;
         for (const f of files) {
-            if (/\.(jpg|jpeg|png)$/i.test(f.name)) { imageFile = f; break; }
+            if (isSupportedImageFile(f)) { imageFile = f; break; }
         }
         if (!imageFile) {
-            alert('Please drop a JPG or PNG image.');
+            alert('Please drop a browser-supported image file such as JPG, PNG, WebP, AVIF, GIF, or BMP.');
             return;
         }
         processImage(imageFile);

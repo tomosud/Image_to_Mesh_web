@@ -1,6 +1,6 @@
 # 実装状況
 
-最終更新: 2026-07-08
+最終更新: 2026-07-09
 
 ## 現在の構成
 
@@ -11,6 +11,7 @@
 ## 実装済み
 
 - MoGe-2 ViT-S / ViT-B / ViT-L の WebGPU 推論と WASM フォールバック
+- JPG / PNG / WebP / AVIF / GIF / BMP などブラウザがデコードできる画像入力
 - `num_tokens`、モデル選択、Scale、Sky / Masked Area、High-Res Depth、EdgeSnap、Backfill の UI
 - MoGe point map から focal / shift / intrinsics / metric depth / camera-space points を復元
 - 入力画像比率・長辺最大 2048px の depth 高解像度化
@@ -101,6 +102,7 @@
 ## 要実機確認
 
 - 複数の縦長・横長画像で、初期表示の向き、余白、Reset View を確認する。
+- WebP / AVIF / GIF / BMP の入力と、非対応形式のエラーメッセージを確認する。
 - ViT-S / ViT-B / ViT-L の focal / shift 復元結果を比較する。
 - WebGPU 使用時と fallback 時の High-Res Depth ステータスと出力差分を確認する。
 - `Initial Depth (EXR)` と `Depth (EXR)` を比較し、JBU と後段処理の差を確認する。
