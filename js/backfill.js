@@ -1,8 +1,9 @@
 // backfill.js — 遮蔽穴インペイント（docs/archive/PLAN_INPAINT_HISTORY.md 参照）
 // viewer が深度段差で面を除去して開く「幅ゼロの隙間」と、エッジ切断で消えた画素の両方を対象に、
-// 深度不連続の奥側画素を種として深度（disparity 平面フィット + ラプラス平滑化）と
-// 色（プルプッシュ + 拡散）を前景の裏へ伸長し、第2レイヤー（world position + テクスチャ）を生成する。
-// 手前側の位置・色は一切参照しない。
+// 深度不連続の奥側画素を種として深度（ラベル毎の disparity 平面フィット + ラプラス平滑化）と
+// 色（伝播 + 拡散）を前景の裏へ伸長し、第2レイヤー（world position + テクスチャ）を生成する。
+// 前景を挟んで分かれた共面ラベルはブリッジ統合し（2d）、前景の下の生成深度は
+// 「局所前景のすぐ裏」へカーテンクランプする（節3）。手前側の位置・色は一切参照しない。
 
 const Backfill = (function () {
 
@@ -154,12 +155,12 @@ const Backfill = (function () {
         // なり、各ラベルが独立に裏へ延長される（＝各奥側エッジからの延長）。
         // これにより「最奥1枚へ吸着」ではなく「各奥側の面をそれぞれ伸ばす」になる。
         const label = new Int32Array(N).fill(-1);
+        let labelCount = 0;
         {
-            let lab = 0;
             for (let s = 0; s < N; s++) {
                 if (!seed[s] || label[s] >= 0) continue;
                 let head = 0, tail = 0;
-                queue[tail++] = s; label[s] = lab;
+                queue[tail++] = s; label[s] = labelCount;
                 while (head < tail) {
                     const i = queue[head++];
                     const x = i % W, y = (i / W) | 0;
@@ -172,10 +173,10 @@ const Backfill = (function () {
                         const dj = 1 / depth[j];
                         const hi = Math.max(di, dj), lo = Math.min(di, dj);
                         if (hi > lo * (1 + jumpTol)) continue;  // 段差は別背景面
-                        label[j] = lab; queue[tail++] = j;
+                        label[j] = labelCount; queue[tail++] = j;
                     }
                 }
-                lab++;
+                labelCount++;
             }
         }
 
@@ -236,6 +237,138 @@ const Backfill = (function () {
             }
         }
 
+        // ---- 1f. ラベル毎の disparity 平面フィット ----
+        // 等深度（disparity 一定）の延長は、斜めの面（床・机・壁）で「エッジの深度のまま
+        // 手前エッジまで長く伸びる板」を作る。3D の平面はスクリーン座標に対して disparity が
+        // アフィン（1/z = a*x + b*y + c）になるため、ラベルごとに (x, y, disparity) へ平面を
+        // フィットし、延長ターゲットを「各画素のレイとそのラベル平面の交点」に置き換える。
+        // 種帯（幅 COLLAR_PX）だけでは延長方向の勾配を拘束できないので、種から台地内を
+        // FIT_SUPPORT_PX まで広げた有効画素も支持点に加える。
+        const FIT_SUPPORT_PX = 24;    // フィット支持点を台地内へ広げる距離(px)
+        const FIT_MIN_SAMPLES = 12;   // これ未満は定数（等深度）フォールバック
+        const FIT_MAX_SAMPLES = 600;  // フィットに使う支持点の上限（間引き）
+        const FIT_BAND_EXTRA = 0.5;   // 平面評価のクランプ帯: ラベル内 disparity 範囲の拡張率
+        const MERGE_TOL = 0.15;       // 2d: 相互予測の相対誤差がこれ未満なら同一面として統合
+        const JOINT_RMS_TOL = 0.08;   // 2d: 統合後の合同フィット残差の上限（超えたら取り消し）
+
+        // (x,y)→disparity の centered ridge 最小二乗 + 相対残差による外れ値1回除去。
+        // 薄い種帯で拘束の無い方向の勾配は ridge により 0（等深度）へ縮退する。
+        // lo/hi は評価時のクランプ帯（外挿の暴走防止）。
+        function fitAffine(xs, ys, ds) {
+            const n = ds.length;
+            const sorted = ds.slice().sort((a, b) => a - b);
+            const pct = (q) => sorted[Math.min(n - 1, Math.floor(n * q))];
+            const result = {
+                a: 0, b: 0, c: sorted[n >> 1], cx: 0, cy: 0, rms: 0,
+                lo: pct(0.02) / (1 + FIT_BAND_EXTRA), hi: pct(0.98) * (1 + FIT_BAND_EXTRA)
+            };
+            for (let k = 0; k < n; k++) { result.cx += xs[k]; result.cy += ys[k]; }
+            result.cx /= n; result.cy /= n;
+            if (n < FIT_MIN_SAMPLES) return result;
+            const keep = new Uint8Array(n).fill(1);
+            for (let pass = 0; pass < 2; pass++) {
+                let cx = 0, cy = 0, cd = 0, m = 0;
+                for (let k = 0; k < n; k++) if (keep[k]) { cx += xs[k]; cy += ys[k]; cd += ds[k]; m++; }
+                if (m < FIT_MIN_SAMPLES) break;   // 外れ値除去で減りすぎたら前パスの結果を使う
+                cx /= m; cy /= m; cd /= m;
+                let sxx = 0, sxy = 0, syy = 0, sxd = 0, syd = 0;
+                for (let k = 0; k < n; k++) {
+                    if (!keep[k]) continue;
+                    const dx = xs[k] - cx, dy = ys[k] - cy, dd = ds[k] - cd;
+                    sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+                    sxd += dx * dd; syd += dy * dd;
+                }
+                const lam = 1e-3 * (sxx + syy) * 0.5 + 1e-12;
+                const det = (sxx + lam) * (syy + lam) - sxy * sxy;
+                result.a = ((syy + lam) * sxd - sxy * syd) / det;
+                result.b = ((sxx + lam) * syd - sxy * sxd) / det;
+                result.c = cd; result.cx = cx; result.cy = cy;
+                const absr = [];
+                let sq = 0, mm = 0;
+                for (let k = 0; k < n; k++) {
+                    if (!keep[k]) continue;
+                    const r = (ds[k] - (result.a * (xs[k] - cx) + result.b * (ys[k] - cy) + cd)) / ds[k];
+                    absr.push(Math.abs(r)); sq += r * r; mm++;
+                }
+                result.rms = Math.sqrt(sq / mm);
+                if (pass === 1) break;
+                absr.sort((p, q) => p - q);
+                const thr = Math.max(3 * absr[absr.length >> 1], 0.01);
+                for (let k = 0; k < n; k++) {
+                    if (!keep[k]) continue;
+                    const r = Math.abs(ds[k] - (result.a * (xs[k] - cx) + result.b * (ys[k] - cy) + result.c)) / ds[k];
+                    if (r > thr) keep[k] = 0;
+                }
+            }
+            return result;
+        }
+
+        // 支持点の収集: 各ラベルの種（robust disparity）+ 種から台地内へ広げた有効画素（raw disparity）
+        const sampX = [], sampY = [], sampD = [];
+        for (let l = 0; l < labelCount; l++) { sampX.push([]); sampY.push([]); sampD.push([]); }
+        for (let i = 0; i < N; i++) {
+            if (!seed[i]) continue;
+            const l = label[i];
+            sampX[l].push(i % W); sampY[l].push((i / W) | 0); sampD[l].push(seedDispRobust[i]);
+        }
+        {
+            const sdist = new Int32Array(N).fill(-1);
+            const slab = new Int32Array(N).fill(-1);
+            let head = 0, tail = 0;
+            for (let i = 0; i < N; i++) if (seed[i]) { sdist[i] = 0; slab[i] = label[i]; queue[tail++] = i; }
+            while (head < tail) {
+                const i = queue[head++];
+                if (sdist[i] >= FIT_SUPPORT_PX) continue;
+                const x = i % W, y = (i / W) | 0;
+                const di = 1 / depth[i];
+                for (const [dx, dy] of OFFS) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                    const j = ny * W + nx;
+                    if (sdist[j] >= 0 || !validMask[j]) continue;
+                    const dj = 1 / depth[j];
+                    const hi = Math.max(di, dj), lo = Math.min(di, dj);
+                    if (hi > lo * (1 + jumpTol)) continue;   // 台地の外（段差越え）は含めない
+                    sdist[j] = sdist[i] + 1;
+                    slab[j] = slab[i];
+                    sampX[slab[j]].push(nx); sampY[slab[j]].push(ny); sampD[slab[j]].push(dj);
+                    queue[tail++] = j;
+                }
+            }
+        }
+        const planes = new Array(labelCount);
+        for (let l = 0; l < labelCount; l++) {
+            const xs = sampX[l], ys = sampY[l], ds = sampD[l];
+            if (ds.length > FIT_MAX_SAMPLES) {
+                const step = Math.ceil(ds.length / FIT_MAX_SAMPLES);
+                const fx = [], fy = [], fd = [];
+                for (let k = 0; k < ds.length; k += step) { fx.push(xs[k]); fy.push(ys[k]); fd.push(ds[k]); }
+                planes[l] = fitAffine(fx, fy, fd);
+            } else {
+                planes[l] = fitAffine(xs, ys, ds);
+            }
+        }
+
+        // 延長ターゲット: ラベル平面のこの画素での disparity（クランプ帯つき）。
+        // 前景の裏かどうかは見ない（BFS の isForeground 判定や奥側優先の比較に使うため、
+        // カーテンクランプは節3の出力時にのみ適用する）。
+        function targetDisp(l, j) {
+            const P = planes[l];
+            const x = j % W, y = (j / W) | 0;
+            let v = P.a * (x - P.cx) + P.b * (y - P.cy) + P.c;
+            if (v < P.lo) v = P.lo; else if (v > P.hi) v = P.hi;
+            return v;
+        }
+
+        // カーテンクランプ: 前景の下では「局所前景のすぐ裏」より手前に出さない。
+        // 前景シルエット際で fill が前景の背中へ寄るため、視点を振ったときの
+        // 開き幅（∝ 前景と fill の disparity 差）が小さくなる。
+        function curtainCap(i, v) {
+            if (!validMask[i]) return v;
+            const cap = (1 / depth[i]) / (1 + jumpTol);
+            return v > cap ? cap : v;
+        }
+
         // ---- 2. 種からマージン付き BFS（最寄り奥側エッジの延長を割り当て）----
         // 多源 BFS で各種から disparity・ラベル・色を同時に伝播する。各穴/前景画素は
         // 「最も近い奥側エッジ」に割り当てられ、その背景面の等深度延長になる。前景を
@@ -276,7 +409,7 @@ const Backfill = (function () {
                         if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                         const j = ny * W + nx;
                         if (!holeMask[j]) continue;
-                        const candidate = bgDisp[i];
+                        const candidate = targetDisp(label[i], j);
                         if (dist[j] >= 0 && !(candidate < bgDisp[j] / (1 + jumpTol))) continue;
                         if (candSrc[j] < 0) {
                             candSrc[j] = i;
@@ -298,7 +431,7 @@ const Backfill = (function () {
                     if (dist[j] < 0) { filledPx++; holePreclaimFilled++; }
                     else holePreclaimOverrides++;
                     dist[j] = Math.min(p + 1, marginPx);
-                    bgDisp[j] = bgDisp[src];
+                    bgDisp[j] = candidate;
                     label[j] = label[src];
                     colorF[j * 3] = colorF[src * 3];
                     colorF[j * 3 + 1] = colorF[src * 3 + 1];
@@ -328,8 +461,9 @@ const Backfill = (function () {
                     (1 / depth[j]) > bgDisp[i] * (1 + jumpTol);
                 if (!isHole && !isForeground) continue;
                 dist[j] = dist[i] + 1;
-                bgDisp[j] = bgDisp[i];
                 label[j] = label[i];
+                // 等深度コピーではなく、割り当てラベル平面のこの画素での disparity を延長ターゲットにする
+                bgDisp[j] = targetDisp(label[j], j);
                 colorF[j * 3] = colorF[i * 3];
                 colorF[j * 3 + 1] = colorF[i * 3 + 1];
                 colorF[j * 3 + 2] = colorF[i * 3 + 2];
@@ -373,13 +507,92 @@ const Backfill = (function () {
                 for (let k = 0; k < changed.length; k++) {
                     const i = changed[k], j = sources[k];
                     if (!(bgDisp[j] < bgDisp[i] / (1 + jumpTol))) continue;
-                    bgDisp[i] = bgDisp[j];
                     label[i] = label[j];
+                    bgDisp[i] = targetDisp(label[i], i);
                     colorF[i * 3] = colorF[j * 3];
                     colorF[i * 3 + 1] = colorF[j * 3 + 1];
                     colorF[i * 3 + 2] = colorF[j * 3 + 2];
                     dist[i] = Math.min(marginPx, Math.max(0, dist[j]) + 1);
                     farPriorityOverrides++;
+                }
+            }
+        }
+
+        // ---- 2d. 共面ラベルのブリッジ統合 ----
+        // 前景を挟んで左右に分かれた同一面（例: 前景の両側に見える同じ壁・床）は 1d で
+        // 別ラベルになり、延長同士が穴の中央でぶつかる disparity 段差になる。段差は
+        // メッシュ化時の視差カットで開き、視点を振ると黒い隙間として見える。
+        // 割り当てが接しているラベル対について、互いの平面が相手の重心位置の disparity を
+        // 予測し合える（相互予測誤差 < MERGE_TOL）なら同一面とみなして統合し、両ラベルの
+        // 支持点で合同フィットした1枚の平面で延長を張り直す（内部シームが消える）。
+        // 合同フィット残差が JOINT_RMS_TOL を超える組は誤統合として取り消す。
+        let mergedGroups = 0, mergedLabels = 0;
+        {
+            // 割り当て済み領域（synth ∪ seed）内で接触しているラベル対を数える
+            const pairCounts = new Map();
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const i = y * W + x;
+                    if (!synth[i] && !seed[i]) continue;
+                    const la = label[i];
+                    for (let k = 0; k < 2; k++) {
+                        const nx = x + (k === 0 ? 1 : 0), ny = y + (k === 0 ? 0 : 1);
+                        if (nx >= W || ny >= H) continue;
+                        const j = ny * W + nx;
+                        if (!synth[j] && !seed[j]) continue;
+                        const lb = label[j];
+                        if (la === lb) continue;
+                        const key = la < lb ? la * labelCount + lb : lb * labelCount + la;
+                        pairCounts.set(key, (pairCounts.get(key) || 0) + 1);
+                    }
+                }
+            }
+            // 相互予測テストに通った対を union-find でまとめる
+            const parent = new Int32Array(labelCount);
+            for (let l = 0; l < labelCount; l++) parent[l] = l;
+            const find = (l) => { while (parent[l] !== l) { parent[l] = parent[parent[l]]; l = parent[l]; } return l; };
+            for (const [key, cnt] of pairCounts) {
+                if (cnt < 3) continue;
+                const la = (key / labelCount) | 0, lb = key % labelCount;
+                const Pa = planes[la], Pb = planes[lb];
+                const predAB = Pa.a * (Pb.cx - Pa.cx) + Pa.b * (Pb.cy - Pa.cy) + Pa.c;
+                const predBA = Pb.a * (Pa.cx - Pb.cx) + Pb.b * (Pa.cy - Pb.cy) + Pb.c;
+                const errAB = Math.abs(predAB - Pb.c) / Pb.c;
+                const errBA = Math.abs(predBA - Pa.c) / Pa.c;
+                if (Math.max(errAB, errBA) >= MERGE_TOL) continue;
+                const ra = find(la), rb = find(lb);
+                if (ra !== rb) parent[rb] = ra;
+            }
+            const groups = new Map();
+            for (let l = 0; l < labelCount; l++) {
+                const r = find(l);
+                if (r === l) continue;
+                if (!groups.has(r)) groups.set(r, [r]);
+                groups.get(r).push(l);
+            }
+            const remap = new Int32Array(labelCount).fill(-1);
+            for (const [root, members] of groups) {
+                const jx = [], jy = [], jd = [];
+                for (const l of members) {
+                    const xs = sampX[l], ys = sampY[l], ds = sampD[l];
+                    const step = Math.max(1, Math.ceil(ds.length * members.length / FIT_MAX_SAMPLES));
+                    for (let k = 0; k < ds.length; k += step) { jx.push(xs[k]); jy.push(ys[k]); jd.push(ds[k]); }
+                }
+                const Pj = fitAffine(jx, jy, jd);
+                if (Pj.rms > JOINT_RMS_TOL) continue;   // 共面と言えない → このグループは統合しない
+                planes[root] = Pj;
+                for (const l of members) remap[l] = root;
+                mergedGroups++;
+                mergedLabels += members.length;
+            }
+            if (mergedGroups) {
+                for (let i = 0; i < N; i++) {
+                    if (!synth[i] && !seed[i]) continue;
+                    const r = remap[label[i]];
+                    if (r < 0) continue;
+                    label[i] = r;
+                    // 種は Dirichlet 値（robust disparity）のまま。延長側だけ合同平面で張り直す
+                    if (synth[i] && !seed[i]) bgDisp[i] = targetDisp(r, i);
                 }
             }
         }
@@ -434,7 +647,7 @@ const Backfill = (function () {
         const disp = new Float32Array(N);
         for (let i = 0; i < N; i++) {
             if (seed[i]) { disp[i] = seedDispRobust[i]; continue; }  // Dirichlet も台地深度
-            if (synth[i]) disp[i] = bgDisp[i];
+            if (synth[i]) disp[i] = curtainCap(i, bgDisp[i]);
         }
         for (let it = 0; it < 40; it++) {
             const forward = (it % 2) === 0;
@@ -453,10 +666,10 @@ const Backfill = (function () {
                 if (cnt === 0) continue;
                 let v = sum / cnt;
                 const maxDisp = bgDisp[i] * frontDispLimit;
-                if (v > maxDisp) v = maxDisp;                  // 既定では割り当てエッジより手前に出さない
+                if (v > maxDisp) v = maxDisp;                  // 既定では割り当てラベル平面より手前に出さない
                 const minDisp = bgDisp[i] / maxDepthFactor;
                 if (v < minDisp) v = minDisp;                  // 外挿の暴走防止
-                disp[i] = v;
+                disp[i] = curtainCap(i, v);                    // 前景の下では局所前景のすぐ裏まで
             }
         }
         // 層全体を PUSH_BASE 分、さらに種から離れるほど PUSH_BACK 分奥へ押し込む。
@@ -538,6 +751,9 @@ const Backfill = (function () {
             holePreclaimOverrides,
             farPriorityPx,
             farPriorityOverrides,
+            labels: labelCount,
+            mergedGroups,
+            mergedLabels,
             size: `${W}x${H}`
         });
         return {
