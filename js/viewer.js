@@ -13,6 +13,9 @@ const Viewer = (function () {
     let backfillMesh = null;          // THREE.Mesh | THREE.Points
     let backfillTextureObject = null;
     let backfillParallaxCutK = 0.5;
+    let currentFillBLayer = null;     // FillB.generate() の戻り値（最奥バックドロップ）
+    let fillBMesh = null;
+    let fillBTextureObject = null;
     let currentBaseName = '';
     let currentIntrinsics = null;     // normalized { fx, fy, cx, cy }
     let currentViewerOptions = {};
@@ -317,6 +320,7 @@ const Viewer = (function () {
         const bounds = calculateBounds(worldPosData);
         updateMeshInfo(meshWidth, meshHeight, bounds);
         rebuildBackfillMesh();
+        rebuildFillBMesh();
 
         if (!skipCameraReset) resetCamera();
     }
@@ -432,6 +436,70 @@ const Viewer = (function () {
         }
         backfillMesh.name = 'BackfillMesh';
         scene.add(backfillMesh);
+    }
+
+    // ---- FillB: 最奥バックドロップ層（fillb.js の出力）----
+    // 面カット無しの連続グリッド。常に全ジオメトリの後ろにあり、
+    // 主メッシュ/backfill の穴の向こうにぼけた背景色を見せる。
+    function setFillBLayer(layer) {
+        currentFillBLayer = layer || null;
+        if (fillBTextureObject) { fillBTextureObject.dispose(); fillBTextureObject = null; }
+        if (initialized) rebuildFillBMesh();
+    }
+
+    function disposeFillBMesh() {
+        if (!fillBMesh) return;
+        scene.remove(fillBMesh);
+        fillBMesh.geometry.dispose();
+        fillBMesh.material.dispose();
+        fillBMesh = null;
+    }
+
+    function getFillBTextureObject() {
+        if (!currentFillBLayer) return null;
+        if (!fillBTextureObject) {
+            const tex = currentFillBLayer.colorTex;
+            fillBTextureObject = new THREE.DataTexture(
+                tex.data, tex.width, tex.height, THREE.RGBAFormat, THREE.UnsignedByteType
+            );
+            fillBTextureObject.needsUpdate = true;
+            fillBTextureObject.flipY = true;
+            fillBTextureObject.magFilter = THREE.LinearFilter;
+            fillBTextureObject.minFilter = THREE.LinearFilter;
+            fillBTextureObject.generateMipmaps = false;
+            fillBTextureObject.encoding = THREE.sRGBEncoding;
+        }
+        return fillBTextureObject;
+    }
+
+    function rebuildFillBMesh() {
+        disposeFillBMesh();
+        const layer = currentFillBLayer;
+        if (!layer || !currentWorldPosData) return;
+
+        const W = layer.width, H = layer.height;
+        const geometry = new THREE.PlaneGeometry(1, 1, W - 1, H - 1);
+        const positions = geometry.attributes.position.array;
+        const uvs = geometry.attributes.uv.array;
+        for (let i = 0; i < W * H; i++) {
+            const pi = i * 4;
+            positions[i * 3] = layer.worldPos[pi];
+            positions[i * 3 + 1] = layer.worldPos[pi + 1];
+            positions[i * 3 + 2] = layer.worldPos[pi + 2];
+            uvs[i * 2] = ((i % W) + 0.5) / W;
+            uvs[i * 2 + 1] = 1 - (((i / W) | 0) + 0.5) / H;
+        }
+        geometry.attributes.position.needsUpdate = true;
+        updateFiniteGeometryBounds(geometry, positions);
+        geometry.computeVertexNormals();
+
+        const material = disableColor
+            ? new THREE.MeshBasicMaterial({ color: 0x888888, side: THREE.DoubleSide })
+            : new THREE.MeshBasicMaterial({ map: getFillBTextureObject(), side: THREE.DoubleSide });
+        material.wireframe = isWireframeMode;
+        fillBMesh = new THREE.Mesh(geometry, material);
+        fillBMesh.name = 'FillBMesh';
+        scene.add(fillBMesh);
     }
 
     function createOrbitControls(target, frontSideOnly) {
@@ -1251,6 +1319,7 @@ const Viewer = (function () {
         isWireframeMode = !isWireframeMode;
         if (mesh) mesh.material.wireframe = isWireframeMode;
         if (backfillMesh && backfillMesh.isMesh) backfillMesh.material.wireframe = isWireframeMode;
+        if (fillBMesh) fillBMesh.material.wireframe = isWireframeMode;
         return isWireframeMode;
     }
     function setLighting(disabled) { disableLighting = disabled; updateMaterial(); }
@@ -1735,7 +1804,7 @@ const Viewer = (function () {
     }
 
     return {
-        init, setData, setBackfillLayer, setBackfillParallaxCutK, resetCamera, toggleOrbitCenterSelection,
+        init, setData, setBackfillLayer, setBackfillParallaxCutK, setFillBLayer, resetCamera, toggleOrbitCenterSelection,
         toggleHorizontalGridAdjustment, useHorizontalGrid,
         setPointsMode, setPointSize, toggleWireframe,
         setLighting, setColorDisabled, isPoints,

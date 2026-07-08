@@ -10,6 +10,7 @@
     let currentBaseName = 'mesh';
     let currentNormalMap = null;   // tangent-space RGBA8 normal map
     let currentBackfill = null;    // 遮蔽穴インペイントの第2レイヤー（Backfill.generate）
+    let currentFillB = null;       // 最奥バックドロップ層（FillB.generate）
     let currentPatchedImage = null; // エッジ混色帯をパッチした表示/backfill用画像（ColorPatch）
     let currentDepthUpsampleDebug = null;
     let modelReady = false;
@@ -272,6 +273,7 @@
             setDownloadEnabled(true);
             $('dlDepthInitial').disabled = !currentDepthUpsampleDebug;
             updateBackfill();
+            updateFillB();
         } finally {
             recomputingPost = false;
             if (showProgress) showLoading(false);
@@ -393,6 +395,24 @@
         Viewer.setBackfillLayer(currentBackfill);
         $('dlBackfillWP').disabled = !currentBackfill;
         $('dlBackfillTex').disabled = !currentBackfill;
+    }
+
+    // 最奥バックドロップ層（fillb.js）。主メッシュ/backfill の穴の向こうに
+    // 「最奥エンベロープ + ぼかした最奥色」の面を置く。軽量パス。
+    function updateFillB() {
+        if (!currentPost || !currentImageData) return;
+        currentFillB = null;
+        if ($('fillBackdropLayer').checked) {
+            currentFillB = FillB.generate({
+                depth: currentPost.depth,
+                validMask: currentPost.cleanedMask,
+                intrinsics: currentPost.intrinsics,
+                color: currentPatchedImage || currentImageData,
+                width: currentPost.width,
+                height: currentPost.height
+            }, {});
+        }
+        Viewer.setFillBLayer(currentFillB);
     }
 
     // ---- メイン処理: 画像 → 推論 → 表示 ----
@@ -559,6 +579,7 @@
         $('smallComponentFaces').addEventListener('change', requestRecompute);
         $('maskMode').addEventListener('change', requestRecompute);
         $('fillOcclusion').addEventListener('change', updateBackfill);
+        $('fillBackdropLayer').addEventListener('change', updateFillB);
         $('fillMargin').addEventListener('input', (e) => {
             updateFillMarginLabel();
         });
