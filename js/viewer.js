@@ -266,7 +266,8 @@ const Viewer = (function () {
             !currentViewerOptions.disableDepthEdgeCleanup
         );
         // 段差カットで孤立した小さい/細いポリ（フリンジのちぎれ等）を除去する
-        erodeBoundaryFaces(geometry, 1);
+        // テスト: 境界1層の erode を停止中（戻すには passes を 1 にする）
+        erodeBoundaryFaces(geometry, 0);
         removeSmallFaceComponents(geometry, getSmallComponentMinFaces());
         // シーム分割で頂点が追加されると attribute 配列が差し替わる
         const finalPositions = geometry.attributes.position.array;
@@ -403,7 +404,8 @@ const Viewer = (function () {
         }
         removeInvalidAndDiscontinuousFaces(geometry, positions, true, dispGapThreshold);
         // 視差カットで孤立した小さい/細い fill 片（面張りの元）を除去する
-        erodeBoundaryFaces(geometry, 1);
+        // テスト: 境界1層の erode を停止中（戻すには passes を 1 にする）
+        erodeBoundaryFaces(geometry, 0);
         removeSmallFaceComponents(geometry, getSmallComponentMinFaces());
         if (!geometry.index || geometry.index.count === 0) { geometry.dispose(); return; }
         updateFiniteGeometryBounds(geometry, positions);
