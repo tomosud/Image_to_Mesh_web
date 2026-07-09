@@ -7,7 +7,10 @@
 
 const Backfill = (function () {
 
-    const OFFS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const DX4 = [1, -1, 0, 0];
+    const DY4 = [0, 0, 1, -1];
+    const DX8 = [1, -1, 0, 0, 1, 1, -1, -1];
+    const DY8 = [0, 0, 1, -1, 1, -1, 1, -1];
 
     // 元解像度の ImageData をモデル解像度 W×H へバイリニア縮小
     function resampleColor(imageData, W, H) {
@@ -55,6 +58,8 @@ const Backfill = (function () {
         const holePreclaimPx = Math.max(0, Math.floor((opts && opts.holePreclaimPx) ?? 3));
         const farPriorityPx = Math.max(0, Math.floor((opts && opts.farPriorityPx) ?? 12));
         const N = W * H;
+        const invDisp = new Float64Array(N);
+        for (let i = 0; i < N; i++) invDisp[i] = 1 / depth[i];
 
         // ---- 1a. 種の検出: 有効画素同士の深度不連続エッジの「奥側」画素 ----
         // （面除去で開く幅ゼロの隙間に対応。手前側は種にしない）
@@ -97,7 +102,8 @@ const Backfill = (function () {
                 while (head < tail) {
                     const i = queue[head++];
                     const x = i % W, y = (i / W) | 0;
-                    for (const [dx, dy] of OFFS) {
+                    for (let k = 0; k < 4; k++) {
+                        const dx = DX4[k], dy = DY4[k];
                         const nx = x + dx, ny = y + dy;
                         if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                         const j = ny * W + nx;
@@ -133,14 +139,15 @@ const Backfill = (function () {
                 const i = queue[head++];
                 if (cdist[i] >= COLLAR_PX) continue;
                 const x = i % W, y = (i / W) | 0;
-                const di = 1 / depth[i];
-                for (const [dx, dy] of OFFS) {
+                const di = invDisp[i];
+                for (let k = 0; k < 4; k++) {
+                    const dx = DX4[k], dy = DY4[k];
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                     const j = ny * W + nx;
                     if (cdist[j] >= 0 || !validMask[j]) continue;
                     // 奥面上（種と同等かそれより奥）のみ。前景へは広げない
-                    if ((1 / depth[j]) > di * (1 + jumpTol)) continue;
+                    if (invDisp[j] > di * (1 + jumpTol)) continue;
                     cdist[j] = cdist[i] + 1;
                     seed[j] = 1;
                     seedCount++;
@@ -164,13 +171,14 @@ const Backfill = (function () {
                 while (head < tail) {
                     const i = queue[head++];
                     const x = i % W, y = (i / W) | 0;
-                    const di = 1 / depth[i];
-                    for (const [dx, dy] of OFFS) {
+                    const di = invDisp[i];
+                    for (let k = 0; k < 4; k++) {
+                        const dx = DX4[k], dy = DY4[k];
                         const nx = x + dx, ny = y + dy;
                         if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                         const j = ny * W + nx;
                         if (!seed[j] || label[j] >= 0) continue;
-                        const dj = 1 / depth[j];
+                        const dj = invDisp[j];
                         const hi = Math.max(di, dj), lo = Math.min(di, dj);
                         if (hi > lo * (1 + jumpTol)) continue;  // 段差は別背景面
                         label[j] = labelCount; queue[tail++] = j;
@@ -200,40 +208,52 @@ const Backfill = (function () {
         const seedDispRobust = new Float32Array(N);
         const seedColRobust = new Float32Array(N * 3);
         {
-            const da = [], ra = [], ga = [], ba = [];
-            const median = (arr) => { const t = arr.slice().sort((a, b) => a - b); return t[t.length >> 1]; };
+            const maxRobustSamples = (ROBUST_R * 2 + 1) * (ROBUST_R * 2 + 1);
+            const da = new Float64Array(maxRobustSamples);
+            const ra = new Float64Array(maxRobustSamples);
+            const ga = new Float64Array(maxRobustSamples);
+            const ba = new Float64Array(maxRobustSamples);
+            const bd = new Float64Array(maxRobustSamples);
+            const br = new Float64Array(maxRobustSamples);
+            const bg = new Float64Array(maxRobustSamples);
+            const bb = new Float64Array(maxRobustSamples);
+            const sortBuf = new Float64Array(maxRobustSamples);
+            const median = (arr, len) => { const t = arr.subarray(0, len); t.sort(); return t[len >> 1]; };
             for (let s = 0; s < N; s++) {
                 if (!seed[s]) continue;
                 const sx = s % W, sy = (s / W) | 0;
-                da.length = ra.length = ga.length = ba.length = 0;
+                let daLen = 0;
                 for (let dy = -ROBUST_R; dy <= ROBUST_R; dy++) {
                     const ny = sy + dy; if (ny < 0 || ny >= H) continue;
                     for (let dx = -ROBUST_R; dx <= ROBUST_R; dx++) {
                         const nx = sx + dx; if (nx < 0 || nx >= W) continue;
                         const j = ny * W + nx;
                         if (!validMask[j]) continue;              // 穴は対象外
-                        da.push(1 / depth[j]);
-                        ra.push(colorBase[j * 4]); ga.push(colorBase[j * 4 + 1]); ba.push(colorBase[j * 4 + 2]);
+                        da[daLen] = invDisp[j];
+                        ra[daLen] = colorBase[j * 4]; ga[daLen] = colorBase[j * 4 + 1]; ba[daLen] = colorBase[j * 4 + 2];
+                        daLen++;
                     }
                 }
-                if (da.length === 0) {
-                    seedDispRobust[s] = 1 / depth[s];
+                if (daLen === 0) {
+                    seedDispRobust[s] = invDisp[s];
                     seedColRobust[s * 3] = colorBase[s * 4];
                     seedColRobust[s * 3 + 1] = colorBase[s * 4 + 1];
                     seedColRobust[s * 3 + 2] = colorBase[s * 4 + 2];
                     continue;
                 }
-                const sorted = da.slice().sort((a, b) => a - b);
-                const dfar = sorted[Math.floor(sorted.length * ROBUST_FAR_Q)];
+                sortBuf.set(da.subarray(0, daLen));
+                const sorted = sortBuf.subarray(0, daLen);
+                sorted.sort();
+                const dfar = sorted[Math.floor(daLen * ROBUST_FAR_Q)];
                 const thr = dfar * (1 + jumpTol);            // 台地の帯（前景・突出画素を除外）
-                const bd = [], br = [], bg = [], bb = [];
-                for (let k = 0; k < da.length; k++) {
-                    if (da[k] <= thr) { bd.push(da[k]); br.push(ra[k]); bg.push(ga[k]); bb.push(ba[k]); }
+                let bdLen = 0;
+                for (let k = 0; k < daLen; k++) {
+                    if (da[k] <= thr) { bd[bdLen] = da[k]; br[bdLen] = ra[k]; bg[bdLen] = ga[k]; bb[bdLen] = ba[k]; bdLen++; }
                 }
-                seedDispRobust[s] = median(bd);
-                seedColRobust[s * 3] = median(br);
-                seedColRobust[s * 3 + 1] = median(bg);
-                seedColRobust[s * 3 + 2] = median(bb);
+                seedDispRobust[s] = median(bd, bdLen);
+                seedColRobust[s * 3] = median(br, bdLen);
+                seedColRobust[s * 3 + 1] = median(bg, bdLen);
+                seedColRobust[s * 3 + 2] = median(bb, bdLen);
             }
         }
 
@@ -320,13 +340,14 @@ const Backfill = (function () {
                 const i = queue[head++];
                 if (sdist[i] >= FIT_SUPPORT_PX) continue;
                 const x = i % W, y = (i / W) | 0;
-                const di = 1 / depth[i];
-                for (const [dx, dy] of OFFS) {
+                const di = invDisp[i];
+                for (let k = 0; k < 4; k++) {
+                    const dx = DX4[k], dy = DY4[k];
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                     const j = ny * W + nx;
                     if (sdist[j] >= 0 || !validMask[j]) continue;
-                    const dj = 1 / depth[j];
+                    const dj = invDisp[j];
                     const hi = Math.max(di, dj), lo = Math.min(di, dj);
                     if (hi > lo * (1 + jumpTol)) continue;   // 台地の外（段差越え）は含めない
                     sdist[j] = sdist[i] + 1;
@@ -365,7 +386,7 @@ const Backfill = (function () {
         // 開き幅（∝ 前景と fill の disparity 差）が小さくなる。
         function curtainCap(i, v) {
             if (!validMask[i]) return v;
-            const cap = (1 / depth[i]) / (1 + jumpTol);
+            const cap = invDisp[i] / (1 + jumpTol);
             return v > cap ? cap : v;
         }
 
@@ -378,7 +399,8 @@ const Backfill = (function () {
         const bgDisp = new Float32Array(N);
         const colorF = new Float32Array(N * 3);
         let filledPx = 0;
-        const seedList = [];
+        const seedList = new Int32Array(N);
+        let seedListLen = 0;
         for (let i = 0; i < N; i++) {
             if (!seed[i]) continue;
             dist[i] = 0;
@@ -386,7 +408,7 @@ const Backfill = (function () {
             colorF[i * 3] = seedColRobust[i * 3];
             colorF[i * 3 + 1] = seedColRobust[i * 3 + 1];
             colorF[i * 3 + 2] = seedColRobust[i * 3 + 2];
-            seedList.push(i);
+            seedList[seedListLen++] = i;
         }
 
         // ---- 2a. 黒穴内だけの奥側 preclaim ----
@@ -394,17 +416,24 @@ const Backfill = (function () {
         // 届いた場合は、より奥（小さい disparity）の値だけが勝つ。ここでは foreground 裏へは
         // 入らないので、黒い削れ幅ぶんの初期割り当てだけを奥側優先にできる。
         let holePreclaimFilled = 0, holePreclaimOverrides = 0;
-        const preclaimOrder = [];
+        const preclaimOrder = new Int32Array(N);
+        let preclaimOrderLen = 0;
         {
             const passes = Math.min(holePreclaimPx, marginPx);
-            let frontier = seedList.slice();
+            let frontier = new Int32Array(N);
+            let nextFrontier = new Int32Array(N);
+            frontier.set(seedList.subarray(0, seedListLen));
+            let frontierLen = seedListLen;
             const candSrc = new Int32Array(N).fill(-1);
             const candDisp = new Float32Array(N);
-            for (let p = 0; p < passes && frontier.length; p++) {
-                const candList = [];
-                for (const i of frontier) {
+            const candList = new Int32Array(N);
+            for (let p = 0; p < passes && frontierLen; p++) {
+                let candListLen = 0;
+                for (let f = 0; f < frontierLen; f++) {
+                    const i = frontier[f];
                     const x = i % W, y = (i / W) | 0;
-                    for (const [dx, dy] of OFFS) {
+                    for (let k = 0; k < 4; k++) {
+                        const dx = DX4[k], dy = DY4[k];
                         const nx = x + dx, ny = y + dy;
                         if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                         const j = ny * W + nx;
@@ -414,15 +443,16 @@ const Backfill = (function () {
                         if (candSrc[j] < 0) {
                             candSrc[j] = i;
                             candDisp[j] = candidate;
-                            candList.push(j);
+                            candList[candListLen++] = j;
                         } else if (candidate < candDisp[j] / (1 + jumpTol)) {
                             candSrc[j] = i;
                             candDisp[j] = candidate;
                         }
                     }
                 }
-                const nextFrontier = [];
-                for (const j of candList) {
+                let nextFrontierLen = 0;
+                for (let c = 0; c < candListLen; c++) {
+                    const j = candList[c];
                     const src = candSrc[j];
                     candSrc[j] = -1;
                     if (src < 0) continue;
@@ -437,28 +467,32 @@ const Backfill = (function () {
                     colorF[j * 3 + 1] = colorF[src * 3 + 1];
                     colorF[j * 3 + 2] = colorF[src * 3 + 2];
                     synth[j] = 1;
-                    nextFrontier.push(j);
-                    preclaimOrder.push(j);
+                    nextFrontier[nextFrontierLen++] = j;
+                    preclaimOrder[preclaimOrderLen++] = j;
                 }
+                const tmp = frontier;
                 frontier = nextFrontier;
+                nextFrontier = tmp;
+                frontierLen = nextFrontierLen;
             }
         }
 
         let head = 0, tail = 0;
-        for (const i of seedList) queue[tail++] = i;
-        for (const i of preclaimOrder) queue[tail++] = i;
+        for (let k = 0; k < seedListLen; k++) queue[tail++] = seedList[k];
+        for (let k = 0; k < preclaimOrderLen; k++) queue[tail++] = preclaimOrder[k];
         while (head < tail) {
             const i = queue[head++];
             if (dist[i] >= marginPx) continue;
             const x = i % W, y = (i / W) | 0;
-            for (const [dx, dy] of OFFS) {
+            for (let k = 0; k < 4; k++) {
+                const dx = DX4[k], dy = DY4[k];
                 const nx = x + dx, ny = y + dy;
                 if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                 const j = ny * W + nx;
                 if (dist[j] >= 0) continue;
                 const isHole = holeMask[j] === 1;
                 const isForeground = validMask[j] === 1 &&
-                    (1 / depth[j]) > bgDisp[i] * (1 + jumpTol);
+                    invDisp[j] > bgDisp[i] * (1 + jumpTol);
                 if (!isHole && !isForeground) continue;
                 dist[j] = dist[i] + 1;
                 label[j] = label[i];
@@ -476,8 +510,9 @@ const Backfill = (function () {
             console.log('[Backfill] seeds found but nothing to fill', { seedCount });
             return null;
         }
-        const synthList = [];
-        for (let i = 0; i < N; i++) if (synth[i]) synthList.push(i);
+        const synthList = new Int32Array(N);
+        let synthListLen = 0;
+        for (let i = 0; i < N; i++) if (synth[i]) synthList[synthListLen++] = i;
 
         // ---- 2b. 局所的な奥側優先 ----
         // 多源 BFS は最寄り seed が勝つため、手前寄りの seed が細い帯として奥穴へ伸びることがある。
@@ -487,13 +522,16 @@ const Backfill = (function () {
         let farPriorityOverrides = 0;
         {
             const passes = Math.min(farPriorityPx, marginPx);
+            const changed = new Int32Array(N);
+            const sources = new Int32Array(N);
             for (let p = 0; p < passes; p++) {
-                const changed = [];
-                const sources = [];
-                for (const i of synthList) {
+                let changedLen = 0;
+                for (let s = 0; s < synthListLen; s++) {
+                    const i = synthList[s];
                     const x = i % W, y = (i / W) | 0;
                     let best = bgDisp[i], bj = -1;
-                    for (const [dx, dy] of OFFS) {
+                    for (let k = 0; k < 4; k++) {
+                        const dx = DX4[k], dy = DY4[k];
                         const nx = x + dx, ny = y + dy;
                         if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                         const j = ny * W + nx;
@@ -501,10 +539,10 @@ const Backfill = (function () {
                         // disparity が小さいほど奥。jumpTol 未満の差は同じ面の揺れとして無視する。
                         if (bgDisp[j] < best / (1 + jumpTol)) { best = bgDisp[j]; bj = j; }
                     }
-                    if (bj >= 0) { changed.push(i); sources.push(bj); }
+                    if (bj >= 0) { changed[changedLen] = i; sources[changedLen] = bj; changedLen++; }
                 }
-                if (!changed.length) break;
-                for (let k = 0; k < changed.length; k++) {
+                if (!changedLen) break;
+                for (let k = 0; k < changedLen; k++) {
                     const i = changed[k], j = sources[k];
                     if (!(bgDisp[j] < bgDisp[i] / (1 + jumpTol))) continue;
                     label[i] = label[j];
@@ -603,16 +641,19 @@ const Backfill = (function () {
         // 採るので埋めた面が周囲より奥へ突き出さない。ラベル・色もそのリムから引き継ぐ。
         // 各画素は反復で「より手前のリム」が届けば更新する（単調増加＝収束）。
         {
-            const closeList = [];
-            for (let i = 0; i < N; i++) if (holeMask[i] && !seed[i] && !synth[i]) closeList.push(i);
-            if (closeList.length) {
+            const closeList = new Int32Array(N);
+            let closeListLen = 0;
+            for (let i = 0; i < N; i++) if (holeMask[i] && !seed[i] && !synth[i]) closeList[closeListLen++] = i;
+            if (closeListLen) {
                 const CLOSE_PASSES = 64;   // 穴を閉じる最大伝播距離(px)。超える巨大穴の芯は黒のまま
                 for (let p = 0; p < CLOSE_PASSES; p++) {
                     let changed = false;
-                    for (const i of closeList) {
+                    for (let c = 0; c < closeListLen; c++) {
+                        const i = closeList[c];
                         const x = i % W, y = (i / W) | 0;
                         let best = -1, bj = -1;
-                        for (const [dx, dy] of OFFS) {
+                        for (let k = 0; k < 4; k++) {
+                            const dx = DX4[k], dy = DY4[k];
                             const nx = x + dx, ny = y + dy;
                             if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                             const j = ny * W + nx;
@@ -634,8 +675,8 @@ const Backfill = (function () {
                     }
                     if (!changed) break;
                 }
-                synthList.length = 0;
-                for (let i = 0; i < N; i++) if (synth[i]) synthList.push(i);
+                synthListLen = 0;
+                for (let i = 0; i < N; i++) if (synth[i]) synthList[synthListLen++] = i;
             }
         }
 
@@ -651,11 +692,12 @@ const Backfill = (function () {
         }
         for (let it = 0; it < 40; it++) {
             const forward = (it % 2) === 0;
-            for (let k = 0; k < synthList.length; k++) {
-                const i = synthList[forward ? k : synthList.length - 1 - k];
+            for (let k = 0; k < synthListLen; k++) {
+                const i = synthList[forward ? k : synthListLen - 1 - k];
                 const x = i % W, y = (i / W) | 0;
                 let sum = 0, cnt = 0;
-                for (const [dx, dy] of OFFS) {
+                for (let n = 0; n < 4; n++) {
+                    const dx = DX4[n], dy = DY4[n];
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                     const j = ny * W + nx;
@@ -675,7 +717,8 @@ const Backfill = (function () {
         // 層全体を PUSH_BASE 分、さらに種から離れるほど PUSH_BACK 分奥へ押し込む。
         // 継ぎ目は襟（1c）が主メッシュの裏に隠すため、基礎押し込みしても切れ目は見えない。
         const depthOut = new Float32Array(N);
-        for (const i of synthList) {
+        for (let k = 0; k < synthListLen; k++) {
+            const i = synthList[k];
             const t = Math.min(dist[i], RAMP_PX) / RAMP_PX;
             depthOut[i] = (1 / disp[i]) * (1 + PUSH_BASE + PUSH_BACK * t);
         }
@@ -688,14 +731,15 @@ const Backfill = (function () {
         // 縞が残るなら ATROUS_PASSES を増やす。完全な除去は将来 inpainting で対応。
         const ATROUS_SCALES = [16, 8, 4, 2, 1];
         const ATROUS_PASSES = 3;
-        const OFFS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
         for (const s of ATROUS_SCALES) {
             for (let it = 0; it < ATROUS_PASSES; it++) {
-                for (const i of synthList) {
+                for (let q = 0; q < synthListLen; q++) {
+                    const i = synthList[q];
                     const x = i % W, y = (i / W) | 0;
                     const li = label[i];
                     let r = colorF[i * 3], g = colorF[i * 3 + 1], b = colorF[i * 3 + 2], cnt = 1;
-                    for (const [dx, dy] of OFFS8) {
+                    for (let k = 0; k < 8; k++) {
+                        const dx = DX8[k], dy = DY8[k];
                         const nx = x + dx * s, ny = y + dy * s;
                         if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                         const j = ny * W + nx;
