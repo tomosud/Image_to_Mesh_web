@@ -32,6 +32,12 @@
 | [TASK_A](docs/tasks/TASK_A_BACKFILL_OPT.md) | backfill.js 定数倍最適化 | 1-D | js/backfill.js + index.html(版数) |
 | [TASK_B](docs/tasks/TASK_B_VIEWER_GEOM_OPT.md) | viewer.js typed array 化ほか | 1-A/1-B/1-C/1-F 一部 | js/viewer.js + index.html(版数) |
 | [TASK_C](docs/tasks/TASK_C_MESHOPT_RESEARCH.md) | meshoptimizer 調査（コード変更なし） | 3 の準備 | docs/tasks/TASK_C_REPORT.md のみ |
+| [TASK_D](docs/tasks/TASK_D_EXPORT_REDUCE.md) | 境界スムース化 + エクスポート時リダクション | 3 本体 | js/viewer.js, index.html, README, js/vendor/ |
+
+2026-07-09: A / B / C 完了（A は Node 同値テスト15ケース一致・2.5倍、B はコードレビュー合格、
+C は meshoptimizer 採用の結論）。Phase 3 は方針決定: **境界スムース化を先に行ってから
+LockBorder 付き簡略化**（テクスチャ＝画面投影なので UV を同変位させれば見た目不変）。
+UI はチェックボックス1つ・誤差駆動の安全設定のみ。詳細は TASK_D。
 
 主セッション側に残す作業: Phase 0（main/viewer/backfill を横断）、1-E ステージキャッシュ
 （main.js の構造変更）、Phase 2（設計判断が必要）、Phase 3 の統合。
