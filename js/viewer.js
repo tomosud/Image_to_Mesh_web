@@ -204,6 +204,17 @@ const Viewer = (function () {
         createMesh(!!options.preserveCamera);
     }
 
+    function disposeGeometryAndMaterial(object) {
+        if (!object) return;
+        if (object.geometry) object.geometry.dispose();
+        const material = object.material;
+        if (Array.isArray(material)) {
+            for (const m of material) if (m) m.dispose();
+        } else if (material) {
+            material.dispose();
+        }
+    }
+
     function createMesh(skipCameraReset) {
         if (!currentWorldPosData) return;
         cancelOrbitPlaneAdjustment(true);
@@ -278,7 +289,7 @@ const Viewer = (function () {
         geometry.computeVertexNormals();
 
         // 頂点カラー（ポイントモード等で使用）
-        if (currentColorTexture && !disableColor) {
+        if (isPointsMode && currentColorTexture && !disableColor) {
             const colors = new Float32Array(finalPositions.length);
             const uvs = geometry.attributes.uv.array;
             const linearColor = new THREE.Color();
@@ -300,10 +311,16 @@ const Viewer = (function () {
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
         }
 
-        const material = createMaterial();
-
-        if (mesh) { scene.remove(mesh); }
-        if (pointsMesh) { scene.remove(pointsMesh); }
+        if (mesh) {
+            scene.remove(mesh);
+            disposeGeometryAndMaterial(mesh);
+            mesh = null;
+        }
+        if (pointsMesh) {
+            scene.remove(pointsMesh);
+            disposeGeometryAndMaterial(pointsMesh);
+            pointsMesh = null;
+        }
 
         if (isPointsMode) {
             const pm = createPointsMaterial();
@@ -311,6 +328,7 @@ const Viewer = (function () {
             scene.add(pointsMesh);
             mesh = null;
         } else {
+            const material = createMaterial();
             mesh = new THREE.Mesh(geometry, material);
             mesh.material.wireframe = isWireframeMode;
             scene.add(mesh);
@@ -396,15 +414,17 @@ const Viewer = (function () {
         // 手前を含む面は disparity 差が大きい（視差大）ので切れ、奥から手前へ伸びる smear を除去する。
         // しきい値はシーン中央値 disparity に対する比 backfillParallaxCutK（スケール不変）。
         //   上げる→切りにくい（黒穴減・smear 増） / 下げる→切りやすい（smear 減・黒穴増）
-        const disps = [];
+        const disps = new Float32Array(positions.length / 3);
+        let dispCount = 0;
         for (let p = 2; p < positions.length; p += 3) {
             const z = positions[p];
-            if (Number.isFinite(z) && Math.abs(z) > 1e-6) disps.push(1 / Math.abs(z));
+            if (Number.isFinite(z) && Math.abs(z) > 1e-6) disps[dispCount++] = 1 / Math.abs(z);
         }
         let dispGapThreshold = Infinity;   // データ無し時は切らない
-        if (disps.length) {
-            disps.sort((a, b) => a - b);
-            dispGapThreshold = backfillParallaxCutK * disps[disps.length >> 1];
+        if (dispCount) {
+            const validDisps = disps.subarray(0, dispCount);
+            validDisps.sort();
+            dispGapThreshold = backfillParallaxCutK * validDisps[validDisps.length >> 1];
         }
         removeInvalidAndDiscontinuousFaces(geometry, positions, true, dispGapThreshold);
         // 視差カットで孤立した小さい/細い fill 片（面張りの元）を除去する
@@ -537,15 +557,32 @@ const Viewer = (function () {
     //   奥面が続いて見える）の両方が所有する。
     // 複製頂点は同一画素レイ上の移動なので位置は元頂点の比率スケールで正確。
     // しきい値は従来の面カットと同じ 0.10 固定（Edge Threshold とは非連動）。
+    function createIndexArray(length, vertexCount) {
+        return vertexCount > 65535 ? new Uint32Array(length) : new Uint16Array(length);
+    }
+
+    function setGeometryIndexArray(geometry, indices) {
+        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    }
+
+    function copyExactIndexPrefix(source, length) {
+        const exact = new source.constructor(length);
+        exact.set(source.subarray(0, length));
+        return exact;
+    }
+
     function splitDiscontinuousFaces(geometry, W, H, splitDepthEdges) {
         if (!geometry.index) return;
         const positions = geometry.attributes.position.array;
         const uvs = geometry.attributes.uv.array;
         const relativeDepthThreshold = 0.10;
-        const indices = [];
-        const extraPos = [];
-        const extraUV = [];
         const baseCount = W * H;
+        let indexCount = 0;
+        let indexWrite = 0;
+        let duplicateWrite = 0;
+        let indices = null;
+        let extraPos = null;
+        let extraUV = null;
 
         // セル角の並び: 0=左上 1=右上 2=左下 3=右下
         const cornerIdx = new Int32Array(4);
@@ -553,95 +590,127 @@ const Viewer = (function () {
         const adjacentCorners = [[1, 2], [0, 3], [0, 3], [1, 2]];
         const mapped = new Int32Array(4);
 
-        function addDuplicate(corner, refCorner) {
+        function emitTriangle(a, b, c, write) {
+            if (write) {
+                indices[indexWrite++] = a;
+                indices[indexWrite++] = b;
+                indices[indexWrite++] = c;
+            } else {
+                indexCount += 3;
+            }
+        }
+
+        function addDuplicate(corner, refCorner, write) {
             const src = cornerIdx[corner];
             const ref = cornerIdx[refCorner];
             const scale = cornerZ[refCorner] / cornerZ[corner];
-            const index = baseCount + extraPos.length / 3;
-            extraPos.push(
-                positions[src * 3] * scale,
-                positions[src * 3 + 1] * scale,
-                positions[src * 3 + 2] * scale
-            );
-            // UV は延長元（同じプレート側）の角からコピー。テクスチャは ColorPatch 済み
-            // なので延長面は自分側の純色になる（複製元の UV のままだと、延長面が
-            // 相手側の色を拾ってフリンジになる。docs/archive/PLAN_EDGE_COLOR_HISTORY.md 3.6）
-            extraUV.push(uvs[ref * 2], uvs[ref * 2 + 1]);
+            const index = baseCount + duplicateWrite;
+            if (write) {
+                const pi = duplicateWrite * 3;
+                extraPos[pi] = positions[src * 3] * scale;
+                extraPos[pi + 1] = positions[src * 3 + 1] * scale;
+                extraPos[pi + 2] = positions[src * 3 + 2] * scale;
+                const ui = duplicateWrite * 2;
+                // UV は延長元（同じプレート側）の角からコピー。テクスチャは ColorPatch 済み
+                // なので延長面は自分側の純色になる（複製元の UV のままだと、延長面が
+                // 相手側の色を拾ってフリンジになる。docs/archive/PLAN_EDGE_COLOR_HISTORY.md 3.6）
+                extraUV[ui] = uvs[ref * 2];
+                extraUV[ui + 1] = uvs[ref * 2 + 1];
+            }
+            duplicateWrite++;
             return index;
+        }
+
+        function processCell(x, y, write) {
+            const tl = y * W + x;
+            cornerIdx[0] = tl;
+            cornerIdx[1] = tl + 1;
+            cornerIdx[2] = tl + W;
+            cornerIdx[3] = tl + W + 1;
+
+            let finite = true;
+            let zMin = Infinity, zMax = -Infinity;
+            for (let k = 0; k < 4; k++) {
+                const pi = cornerIdx[k] * 3;
+                const px = positions[pi], py = positions[pi + 1], pz = positions[pi + 2];
+                if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) {
+                    finite = false;
+                    break;
+                }
+                const z = Math.abs(pz);
+                cornerZ[k] = Math.max(z, 1e-9);
+                if (z < zMin) zMin = z;
+                if (z > zMax) zMax = z;
+            }
+            if (!finite) return;
+
+            const isSeam = splitDepthEdges &&
+                (zMax - zMin) > relativeDepthThreshold * Math.max(zMin, 1e-6);
+            if (!isSeam) {
+                // PlaneGeometry と同じ三角形分割: (TL,BL,TR), (BL,BR,TR)
+                emitTriangle(cornerIdx[0], cornerIdx[2], cornerIdx[1], write);
+                emitTriangle(cornerIdx[2], cornerIdx[3], cornerIdx[1], write);
+                return;
+            }
+
+            // near/far の2値分類（幾何平均しきい値）
+            const t = Math.sqrt(zMin * zMax);
+            // far プレートと near プレートを両方張る
+            for (let side = 0; side < 2; side++) {
+                const wantFar = side === 0;
+                // このプレート側の実在角が内部でさらに段差を持つ場合（＝3つ以上の深度が
+                // 集まる三重点セル）、2値分割では中間深度を跨ぐ面（スパイク）になる。
+                // そのプレートは張らずに欠かせ、背後は backfill が埋める。
+                let sMin = Infinity, sMax = -Infinity, sideCount = 0;
+                for (let k = 0; k < 4; k++) {
+                    if ((cornerZ[k] > t) === wantFar) {
+                        sideCount++;
+                        if (cornerZ[k] < sMin) sMin = cornerZ[k];
+                        if (cornerZ[k] > sMax) sMax = cornerZ[k];
+                    }
+                }
+                if (sideCount === 0) continue;
+                if (sMax - sMin > relativeDepthThreshold * Math.max(sMin, 1e-6)) continue;
+                for (let k = 0; k < 4; k++) {
+                    const isFar = cornerZ[k] > t;
+                    if (isFar === wantFar) {
+                        mapped[k] = cornerIdx[k];
+                        continue;
+                    }
+                    // 自分と反対側の角 → 同じプレート側の隣接角（無ければ対角）を
+                    // 参照に、その深度へ複製
+                    const adj = adjacentCorners[k];
+                    let refCorner = (cornerZ[adj[0]] > t) === wantFar ? adj[0]
+                        : (cornerZ[adj[1]] > t) === wantFar ? adj[1]
+                            : 3 - k;
+                    mapped[k] = addDuplicate(k, refCorner, write);
+                }
+                emitTriangle(mapped[0], mapped[2], mapped[1], write);
+                emitTriangle(mapped[2], mapped[3], mapped[1], write);
+            }
         }
 
         for (let y = 0; y < H - 1; y++) {
             for (let x = 0; x < W - 1; x++) {
-                const tl = y * W + x;
-                cornerIdx[0] = tl;
-                cornerIdx[1] = tl + 1;
-                cornerIdx[2] = tl + W;
-                cornerIdx[3] = tl + W + 1;
-
-                let finite = true;
-                let zMin = Infinity, zMax = -Infinity;
-                for (let k = 0; k < 4; k++) {
-                    const pi = cornerIdx[k] * 3;
-                    const px = positions[pi], py = positions[pi + 1], pz = positions[pi + 2];
-                    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) {
-                        finite = false;
-                        break;
-                    }
-                    const z = Math.abs(pz);
-                    cornerZ[k] = Math.max(z, 1e-9);
-                    if (z < zMin) zMin = z;
-                    if (z > zMax) zMax = z;
-                }
-                if (!finite) continue;
-
-                const isSeam = splitDepthEdges &&
-                    (zMax - zMin) > relativeDepthThreshold * Math.max(zMin, 1e-6);
-                if (!isSeam) {
-                    // PlaneGeometry と同じ三角形分割: (TL,BL,TR), (BL,BR,TR)
-                    indices.push(cornerIdx[0], cornerIdx[2], cornerIdx[1]);
-                    indices.push(cornerIdx[2], cornerIdx[3], cornerIdx[1]);
-                    continue;
-                }
-
-                // near/far の2値分類（幾何平均しきい値）
-                const t = Math.sqrt(zMin * zMax);
-                // far プレートと near プレートを両方張る
-                for (let side = 0; side < 2; side++) {
-                    const wantFar = side === 0;
-                    // このプレート側の実在角が内部でさらに段差を持つ場合（＝3つ以上の深度が
-                    // 集まる三重点セル）、2値分割では中間深度を跨ぐ面（スパイク）になる。
-                    // そのプレートは張らずに欠かせ、背後は backfill が埋める。
-                    let sMin = Infinity, sMax = -Infinity, sideCount = 0;
-                    for (let k = 0; k < 4; k++) {
-                        if ((cornerZ[k] > t) === wantFar) {
-                            sideCount++;
-                            if (cornerZ[k] < sMin) sMin = cornerZ[k];
-                            if (cornerZ[k] > sMax) sMax = cornerZ[k];
-                        }
-                    }
-                    if (sideCount === 0) continue;
-                    if (sMax - sMin > relativeDepthThreshold * Math.max(sMin, 1e-6)) continue;
-                    for (let k = 0; k < 4; k++) {
-                        const isFar = cornerZ[k] > t;
-                        if (isFar === wantFar) {
-                            mapped[k] = cornerIdx[k];
-                            continue;
-                        }
-                        // 自分と反対側の角 → 同じプレート側の隣接角（無ければ対角）を
-                        // 参照に、その深度へ複製
-                        const adj = adjacentCorners[k];
-                        let refCorner = (cornerZ[adj[0]] > t) === wantFar ? adj[0]
-                            : (cornerZ[adj[1]] > t) === wantFar ? adj[1]
-                                : 3 - k;
-                        mapped[k] = addDuplicate(k, refCorner);
-                    }
-                    indices.push(mapped[0], mapped[2], mapped[1]);
-                    indices.push(mapped[2], mapped[3], mapped[1]);
-                }
+                processCell(x, y, false);
             }
         }
 
-        if (extraPos.length) {
+        const extraVertexCount = duplicateWrite;
+        const totalVertexCount = baseCount + extraVertexCount;
+        indices = createIndexArray(indexCount, totalVertexCount);
+        extraPos = new Float32Array(extraVertexCount * 3);
+        extraUV = new Float32Array(extraVertexCount * 2);
+        indexWrite = 0;
+        duplicateWrite = 0;
+
+        for (let y = 0; y < H - 1; y++) {
+            for (let x = 0; x < W - 1; x++) {
+                processCell(x, y, true);
+            }
+        }
+
+        if (extraVertexCount) {
             const newPositions = new Float32Array(positions.length + extraPos.length);
             newPositions.set(positions, 0);
             newPositions.set(extraPos, positions.length);
@@ -651,7 +720,7 @@ const Viewer = (function () {
             newUVs.set(extraUV, uvs.length);
             geometry.setAttribute('uv', new THREE.BufferAttribute(newUVs, 2));
         }
-        geometry.setIndex(indices);
+        setGeometryIndexArray(geometry, indices);
     }
 
     // Do not connect masked pixels or surfaces separated by a large depth jump.
@@ -662,7 +731,8 @@ const Viewer = (function () {
     function removeInvalidAndDiscontinuousFaces(geometry, positions, removeDepthEdges, dispGapThreshold) {
         if (!geometry.index) return;
         const source = geometry.index.array;
-        const kept = [];
+        const kept = new source.constructor(source.length);
+        let keptCount = 0;
         const gapThreshold = (typeof dispGapThreshold === 'number') ? dispGapThreshold : Infinity;
 
         for (let i = 0; i < source.length; i += 3) {
@@ -682,16 +752,24 @@ const Viewer = (function () {
                 const dispGap = 1 / Math.max(zNear, 1e-6) - 1 / Math.max(zFar, 1e-6);
                 if (dispGap > gapThreshold) continue;
             }
-            kept.push(a, b, c);
+            kept[keptCount++] = a;
+            kept[keptCount++] = b;
+            kept[keptCount++] = c;
         }
 
-        geometry.setIndex(kept);
+        setGeometryIndexArray(geometry, copyExactIndexPrefix(kept, keptCount));
     }
 
     // 境界エッジの頂点に触る face を指定回数削る。Small Component Faces の前に1層削ることで、
     // 1ポリ幅でつながった細いブリッジを連結成分から切り離すテスト用処理。
+    const EDGE_KEY_STRIDE = 67108864; // 2^26。lo/hi が 26bit 未満なら IEEE-754 整数で正確。
+
     function erodeBoundaryFaces(geometry, passes) {
         if (!geometry.index || passes <= 0) return;
+        const vertexCount = geometry.attributes.position.count;
+        if (vertexCount >= EDGE_KEY_STRIDE) {
+            throw new Error('erodeBoundaryFaces requires vertexCount < 2^26 for exact numeric edge keys');
+        }
         for (let pass = 0; pass < passes; pass++) {
             const idx = geometry.index.array;
             const nF = idx.length / 3;
@@ -709,30 +787,34 @@ const Viewer = (function () {
             const boundaryVertex = new Uint8Array(geometry.attributes.position.count);
             edgeUse.forEach((count, key) => {
                 if (count !== 1) return;
-                const sep = key.indexOf(',');
-                boundaryVertex[Number(key.slice(0, sep))] = 1;
-                boundaryVertex[Number(key.slice(sep + 1))] = 1;
+                const lo = Math.floor(key / EDGE_KEY_STRIDE);
+                const hi = key - lo * EDGE_KEY_STRIDE;
+                boundaryVertex[lo] = 1;
+                boundaryVertex[hi] = 1;
             });
 
             let removed = 0;
-            const kept = [];
+            const kept = new idx.constructor(idx.length);
+            let keptCount = 0;
             for (let f = 0; f < nF; f++) {
                 const b = f * 3;
                 const a = idx[b], c = idx[b + 1], d = idx[b + 2];
                 if (boundaryVertex[a] || boundaryVertex[c] || boundaryVertex[d]) {
                     removed++;
                 } else {
-                    kept.push(a, c, d);
+                    kept[keptCount++] = a;
+                    kept[keptCount++] = c;
+                    kept[keptCount++] = d;
                 }
             }
             if (removed === 0) return;
-            geometry.setIndex(kept);
+            setGeometryIndexArray(geometry, copyExactIndexPrefix(kept, keptCount));
         }
     }
 
     function addEdgeUse(edgeUse, a, b) {
         const lo = Math.min(a, b), hi = Math.max(a, b);
-        const key = `${lo},${hi}`;
+        const key = lo * EDGE_KEY_STRIDE + hi;
         edgeUse.set(key, (edgeUse.get(key) || 0) + 1);
     }
 
@@ -761,14 +843,17 @@ const Viewer = (function () {
         const size = new Int32Array(nF);
         for (let f = 0; f < nF; f++) size[find(f)]++;
         let removed = 0;
-        const kept = [];
+        const kept = new idx.constructor(idx.length);
+        let keptCount = 0;
         for (let f = 0; f < nF; f++) {
             if (size[find(f)] >= minFaces) {
                 const b = f * 3;
-                kept.push(idx[b], idx[b + 1], idx[b + 2]);
+                kept[keptCount++] = idx[b];
+                kept[keptCount++] = idx[b + 1];
+                kept[keptCount++] = idx[b + 2];
             } else removed++;
         }
-        if (removed > 0) geometry.setIndex(kept);
+        if (removed > 0) setGeometryIndexArray(geometry, copyExactIndexPrefix(kept, keptCount));
     }
 
     function getSmallComponentMinFaces() {
