@@ -37,7 +37,7 @@
 - High-Res Depth: ON
 - High-Res Depth long edge: `2048px`
 - Initial Depth Resize: `Bilinear` (internal, UI hidden)
-- Edge Threshold: `0.100`
+- Edge Threshold: `0.050`
 - Snap Width: `8`
 - Small Component Faces: `64`
 - Sky / Masked Area: Sky Backdrop

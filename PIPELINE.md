@@ -75,7 +75,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 
 - エッジ検出: 横/縦の隣接画素ペアを比較し、相対 depth 段差が **Edge Threshold** を超える場所
 - 既定値:
-  - `Edge Threshold`: `0.100`
+  - `Edge Threshold`: `0.050`
   - `Snap Width`: `8`
 - 窓検出（追加）: 各ステップが Edge Threshold 未満でも、半径 `3px` の窓内に「自分より `12%`
   以上手前」と「`12%` 以上奥」の画素が両方あれば marked にする。隣接対では拾えない「数px

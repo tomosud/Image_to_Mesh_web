@@ -128,7 +128,7 @@ Controls EdgeSnap detection of sharp depth discontinuities. The implementation c
 Marked pixels are not deleted. Stable neighboring depth areas propagate into the marked pixels, so in-between ramp values are replaced by the nearest near/far surface in log-depth space. The viewer also enables mesh seam splitting while Edge Threshold is not `Off`; the actual face-splitting test uses a fixed `0.10` relative depth jump.
 
 - Range: `0.005`–`1.000`
-- Default: `0.100`
+- Default: `0.050`
 - Lower values detect and split more edges
 - Higher values keep more surfaces connected but may leave stretched geometry
 - `1.000` displays as `Off` and disables edge snapping and splitting
