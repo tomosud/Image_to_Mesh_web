@@ -277,3 +277,10 @@ Input images and generated geometry remain in the browser. Network access is use
 This tool is released under the [MIT License](LICENSE).
 
 Inference uses MoGe-2 from [microsoft/MoGe](https://github.com/microsoft/moge). MoGe code is licensed under the MIT License, while the DINOv2 code included in MoGe is licensed under the Apache License 2.0. Use the models and related components in accordance with their respective licenses.
+
+### Third-party libraries
+
+- meshoptimizer (`js/vendor/meshopt_simplifier.js`)
+  License: MIT License
+  Copyright (c) 2016-2026 Arseny Kapoulkine
+  Source: https://github.com/zeux/meshoptimizer / https://www.npmjs.com/package/meshoptimizer

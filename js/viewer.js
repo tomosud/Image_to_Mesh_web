@@ -39,6 +39,20 @@ const Viewer = (function () {
     let disableLighting = true;
     let disableColor = false;
     let initialized = false;
+    let reducePolygons = true;
+    let reductionTimer = null;
+    let reductionGeneration = 0;
+    let reductionRunPromise = null;
+    let meshoptSimplifierPromise = null;
+    let meshoptReductionDisabled = false;
+
+    const REDUCE_DEBOUNCE_MS = 400;
+    const REDUCE_TARGET_RATIO = 0.1;
+    const REDUCE_TARGET_ERROR = 0.01;
+    const REDUCE_UV_WEIGHT = 1.0;
+    const SMOOTH_ITERS = 3;
+    const SMOOTH_LAMBDA = 0.5;
+    const SMOOTH_CLAMP_CELLS = 0.75;
 
     function init() {
         if (initialized) return;
@@ -76,6 +90,11 @@ const Viewer = (function () {
         window.addEventListener('keydown', onKeyDown);
         window.addEventListener('keyup', onKeyUp);
         window.addEventListener('blur', () => movementKeys.clear());
+        const reduceEl = document.getElementById('reducePolygons');
+        if (reduceEl) {
+            reducePolygons = reduceEl.checked;
+            reduceEl.addEventListener('change', () => setPolygonReductionEnabled(reduceEl.checked));
+        }
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.6));
         const d1 = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -339,6 +358,7 @@ const Viewer = (function () {
         updateMeshInfo(meshWidth, meshHeight, bounds);
         rebuildBackfillMesh();
         rebuildFillBMesh();
+        scheduleReduction();
 
         if (!skipCameraReset) resetCamera();
     }
@@ -376,9 +396,9 @@ const Viewer = (function () {
     function createBackfillMaterial() {
         const MaterialClass = disableLighting ? THREE.MeshBasicMaterial : THREE.MeshStandardMaterial;
         if (disableColor || !currentBackfillLayer) {
-            return new MaterialClass({ color: 0xffffff, side: THREE.DoubleSide, flatShading: false });
+            return new MaterialClass(createMeshMaterialOptions({ color: 0xffffff }));
         }
-        return new MaterialClass({ map: getBackfillTextureObject(), side: THREE.DoubleSide, flatShading: false });
+        return new MaterialClass(createMeshMaterialOptions({ map: getBackfillTextureObject() }));
     }
 
     function disposeBackfillMesh() {
@@ -456,6 +476,7 @@ const Viewer = (function () {
         }
         backfillMesh.name = 'BackfillMesh';
         scene.add(backfillMesh);
+        scheduleReduction();
     }
 
     // ---- FillB: 最奥バックドロップ層（fillb.js の出力）----
@@ -520,6 +541,7 @@ const Viewer = (function () {
         fillBMesh = new THREE.Mesh(geometry, material);
         fillBMesh.name = 'FillBMesh';
         scene.add(fillBMesh);
+        scheduleReduction();
     }
 
     function createOrbitControls(target, frontSideOnly) {
@@ -861,6 +883,341 @@ const Viewer = (function () {
         return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 64;
     }
 
+    function cancelReduction() {
+        reductionGeneration++;
+        if (reductionTimer != null) {
+            clearTimeout(reductionTimer);
+            reductionTimer = null;
+        }
+    }
+
+    function scheduleReduction() {
+        if (!reducePolygons || isPointsMode || meshoptReductionDisabled) {
+            cancelReduction();
+            return;
+        }
+        const hasTarget = (mesh && mesh.isMesh) || (backfillMesh && backfillMesh.isMesh) || (fillBMesh && fillBMesh.isMesh);
+        if (!hasTarget) return;
+        const token = ++reductionGeneration;
+        if (reductionTimer != null) clearTimeout(reductionTimer);
+        reductionTimer = setTimeout(() => {
+            reductionTimer = null;
+            const run = new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+                .then(() => runReduction(token))
+                .finally(() => {
+                    if (reductionRunPromise === run) reductionRunPromise = null;
+                });
+            reductionRunPromise = run;
+        }, REDUCE_DEBOUNCE_MS);
+    }
+
+    async function flushReduction() {
+        if (!reducePolygons || isPointsMode || meshoptReductionDisabled) return;
+        if (reductionTimer != null) {
+            clearTimeout(reductionTimer);
+            reductionTimer = null;
+            const token = reductionGeneration;
+            const run = runReduction(token).finally(() => {
+                if (reductionRunPromise === run) reductionRunPromise = null;
+            });
+            reductionRunPromise = run;
+            await run;
+        } else if (reductionRunPromise) {
+            await reductionRunPromise;
+        }
+    }
+
+    async function loadMeshoptSimplifier() {
+        if (meshoptReductionDisabled) return null;
+        if (!meshoptSimplifierPromise) {
+            meshoptSimplifierPromise = import('./vendor/meshopt_simplifier.js')
+                .then(async (module) => {
+                    const simplifier = module.MeshoptSimplifier;
+                    if (!simplifier || simplifier.supported === false) throw new Error('MeshoptSimplifier is not supported');
+                    await simplifier.ready;
+                    return simplifier;
+                })
+                .catch((error) => {
+                    meshoptReductionDisabled = true;
+                    console.warn('[Reduce] meshoptimizer disabled:', error);
+                    return null;
+                });
+        }
+        return meshoptSimplifierPromise;
+    }
+
+    async function runReduction(token) {
+        if (token !== reductionGeneration || !reducePolygons || isPointsMode || meshoptReductionDisabled) return;
+        const simplifier = await loadMeshoptSimplifier();
+        if (!simplifier || token !== reductionGeneration || !reducePolygons || isPointsMode) return;
+        const started = performance.now();
+        reduceDisplayMesh(mesh, 'main', simplifier, true, token);
+        reduceDisplayMesh(backfillMesh, 'backfill', simplifier, true, token);
+        reduceDisplayMesh(fillBMesh, 'fillb', simplifier, false, token);
+        const elapsed = performance.now() - started;
+        console.log(`[Reduce] done ${elapsed.toFixed(1)}ms`);
+    }
+
+    function reduceDisplayMesh(target, name, simplifier, smooth, token) {
+        if (token !== reductionGeneration || !target || !target.isMesh || !target.geometry || !target.geometry.index) return;
+        const sourceGeometry = target.geometry;
+        const beforeFaces = sourceGeometry.index.count / 3;
+        const work = createFiniteCompactGeometry(sourceGeometry);
+        if (!work || !work.index || work.index.count === 0) {
+            if (work) work.dispose();
+            return;
+        }
+        if (smooth) smoothBoundaryScreenSpace(work);
+        const reduced = simplifyCompactGeometry(work, simplifier);
+        work.dispose();
+        if (!reduced || token !== reductionGeneration || !reducePolygons || isPointsMode) {
+            if (reduced) reduced.dispose();
+            return;
+        }
+        const old = target.geometry;
+        target.geometry = reduced;
+        old.dispose();
+        const afterFaces = reduced.index ? reduced.index.count / 3 : 0;
+        const error = Number.isFinite(reduced.userData.simplifyError) ? reduced.userData.simplifyError.toFixed(6) : 'n/a';
+        console.log(`[Reduce] ${name} ${beforeFaces} -> ${afterFaces} faces, error=${error}`);
+    }
+
+    function createFiniteCompactGeometry(sourceGeometry) {
+        const posAttr = sourceGeometry.getAttribute('position');
+        const uvAttr = sourceGeometry.getAttribute('uv');
+        const indexAttr = sourceGeometry.getIndex();
+        if (!posAttr || !uvAttr || !indexAttr) return null;
+        const sourcePositions = posAttr.array;
+        const sourceUVs = uvAttr.array;
+        const sourceIndices = indexAttr.array;
+        const sourceVertexCount = posAttr.count;
+        const remap = new Int32Array(sourceVertexCount);
+        remap.fill(-1);
+        const positions = new Float32Array(sourceVertexCount * 3);
+        const uvs = new Float32Array(sourceVertexCount * 2);
+        const indices = new Uint32Array(sourceIndices.length);
+        let vertexCount = 0;
+        let indexCount = 0;
+
+        for (let i = 0; i < sourceIndices.length; i += 3) {
+            const a = sourceIndices[i], b = sourceIndices[i + 1], c = sourceIndices[i + 2];
+            if (!isFiniteSourceVertex(sourcePositions, a) ||
+                !isFiniteSourceVertex(sourcePositions, b) ||
+                !isFiniteSourceVertex(sourcePositions, c)) {
+                continue;
+            }
+            indices[indexCount++] = compactSourceVertex(a);
+            indices[indexCount++] = compactSourceVertex(b);
+            indices[indexCount++] = compactSourceVertex(c);
+        }
+        if (indexCount === 0) return null;
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions.slice(0, vertexCount * 3), 3));
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs.slice(0, vertexCount * 2), 2));
+        geometry.setIndex(new THREE.BufferAttribute(indices.slice(0, indexCount), 1));
+        geometry.computeVertexNormals();
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        return geometry;
+
+        function compactSourceVertex(sourceIndex) {
+            let outIndex = remap[sourceIndex];
+            if (outIndex >= 0) return outIndex;
+            outIndex = vertexCount++;
+            remap[sourceIndex] = outIndex;
+            positions.set(sourcePositions.subarray(sourceIndex * 3, sourceIndex * 3 + 3), outIndex * 3);
+            uvs.set(sourceUVs.subarray(sourceIndex * 2, sourceIndex * 2 + 2), outIndex * 2);
+            return outIndex;
+        }
+    }
+
+    function isFiniteSourceVertex(positions, vertexIndex) {
+        const pi = vertexIndex * 3;
+        return Number.isFinite(positions[pi]) &&
+            Number.isFinite(positions[pi + 1]) &&
+            Number.isFinite(positions[pi + 2]);
+    }
+
+    function smoothBoundaryScreenSpace(geometry) {
+        if (!hasValidIntrinsics(currentIntrinsics) || !geometry.index) return;
+        const positions = geometry.attributes.position.array;
+        const uvs = geometry.attributes.uv.array;
+        const vertexCount = geometry.attributes.position.count;
+        const boundaryNeighbors = collectBoundaryNeighbors(geometry);
+        const u0 = new Float32Array(vertexCount);
+        const v0 = new Float32Array(vertexCount);
+        const u = new Float32Array(vertexCount);
+        const v = new Float32Array(vertexCount);
+        const zValues = new Float32Array(vertexCount);
+        const movable = new Uint8Array(vertexCount);
+        const { fx, fy, cx, cy } = currentIntrinsics;
+        const dims = inferGeometryGridSize(uvs, vertexCount);
+        const maxStep = SMOOTH_CLAMP_CELLS;
+
+        for (let i = 0; i < vertexCount; i++) {
+            const pi = i * 3;
+            const z = positions[pi + 2];
+            zValues[i] = z;
+            if (!Number.isFinite(z) || Math.abs(z) < 1e-8) {
+                u0[i] = u[i] = uvs[i * 2];
+                v0[i] = v[i] = 1 - uvs[i * 2 + 1];
+                continue;
+            }
+            u0[i] = cx + (-positions[pi] / z) * fx;
+            v0[i] = cy + (-positions[pi + 1] / z) * fy;
+            u[i] = u0[i];
+            v[i] = v0[i];
+            if (!Number.isFinite(u0[i]) || !Number.isFinite(v0[i])) continue;
+            const neighbors = boundaryNeighbors[i];
+            if (!neighbors || neighbors.length !== 2) continue;
+            if (isOuterFrameVertex(u0[i], v0[i], dims.width, dims.height)) continue;
+            movable[i] = 1;
+        }
+
+        for (let iter = 0; iter < SMOOTH_ITERS; iter++) {
+            const nextU = new Float32Array(u);
+            const nextV = new Float32Array(v);
+            for (let i = 0; i < vertexCount; i++) {
+                if (!movable[i]) continue;
+                const neighbors = boundaryNeighbors[i];
+                const targetU = (u[neighbors[0]] + u[neighbors[1]]) * 0.5;
+                const targetV = (v[neighbors[0]] + v[neighbors[1]]) * 0.5;
+                let candidateU = u[i] + (targetU - u[i]) * SMOOTH_LAMBDA;
+                let candidateV = v[i] + (targetV - v[i]) * SMOOTH_LAMBDA;
+                const cellDx = (candidateU - u0[i]) * Math.max(1, dims.width - 1);
+                const cellDy = (candidateV - v0[i]) * Math.max(1, dims.height - 1);
+                const cellLen = Math.hypot(cellDx, cellDy);
+                if (cellLen > maxStep) {
+                    const scale = maxStep / cellLen;
+                    candidateU = u0[i] + (candidateU - u0[i]) * scale;
+                    candidateV = v0[i] + (candidateV - v0[i]) * scale;
+                }
+                nextU[i] = candidateU;
+                nextV[i] = candidateV;
+            }
+            u.set(nextU);
+            v.set(nextV);
+        }
+
+        let moved = false;
+        for (let i = 0; i < vertexCount; i++) {
+            if (!movable[i]) continue;
+            const du = u[i] - u0[i];
+            const dv = v[i] - v0[i];
+            if (Math.abs(du) < 1e-8 && Math.abs(dv) < 1e-8) continue;
+            const pi = i * 3;
+            const z = zValues[i];
+            positions[pi] = -((u[i] - cx) / fx) * z;
+            positions[pi + 1] = -((v[i] - cy) / fy) * z;
+            uvs[i * 2] = Math.max(0, Math.min(1, uvs[i * 2] + du));
+            uvs[i * 2 + 1] = Math.max(0, Math.min(1, uvs[i * 2 + 1] - dv));
+            moved = true;
+        }
+        if (!moved) return;
+        geometry.attributes.position.needsUpdate = true;
+        geometry.attributes.uv.needsUpdate = true;
+        geometry.computeVertexNormals();
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+    }
+
+    function collectBoundaryNeighbors(geometry) {
+        const idx = geometry.index.array;
+        const vertexCount = geometry.attributes.position.count;
+        const edgeUse = new Map();
+        const neighbors = Array.from({ length: vertexCount }, () => []);
+        for (let i = 0; i < idx.length; i += 3) {
+            addEdgeUse(edgeUse, idx[i], idx[i + 1]);
+            addEdgeUse(edgeUse, idx[i + 1], idx[i + 2]);
+            addEdgeUse(edgeUse, idx[i + 2], idx[i]);
+        }
+        edgeUse.forEach((count, key) => {
+            if (count !== 1) return;
+            const a = Math.floor(key / EDGE_KEY_STRIDE);
+            const b = key - a * EDGE_KEY_STRIDE;
+            neighbors[a].push(b);
+            neighbors[b].push(a);
+        });
+        return neighbors;
+    }
+
+    function inferGeometryGridSize(uvs, vertexCount) {
+        let minPositiveDu = Infinity;
+        let minPositiveDv = Infinity;
+        let prevU = uvs[0], prevV = uvs[1];
+        for (let i = 1; i < vertexCount; i++) {
+            const u = uvs[i * 2], v = uvs[i * 2 + 1];
+            const du = Math.abs(u - prevU);
+            const dv = Math.abs(v - prevV);
+            if (du > 1e-7) minPositiveDu = Math.min(minPositiveDu, du);
+            if (dv > 1e-7) minPositiveDv = Math.min(minPositiveDv, dv);
+            prevU = u; prevV = v;
+        }
+        const width = Number.isFinite(minPositiveDu) ? Math.max(2, Math.round(1 / minPositiveDu)) : Math.max(2, Math.round(Math.sqrt(vertexCount)));
+        const height = Number.isFinite(minPositiveDv) ? Math.max(2, Math.round(1 / minPositiveDv)) : Math.max(2, Math.round(vertexCount / width));
+        return { width, height };
+    }
+
+    function isOuterFrameVertex(u, v, width, height) {
+        const uPad = 1 / Math.max(1, width);
+        const vPad = 1 / Math.max(1, height);
+        return u <= uPad || u >= 1 - uPad || v <= vPad || v >= 1 - vPad;
+    }
+
+    function simplifyCompactGeometry(geometry, simplifier) {
+        const posAttr = geometry.getAttribute('position');
+        const uvAttr = geometry.getAttribute('uv');
+        const indexAttr = geometry.getIndex();
+        if (!posAttr || !uvAttr || !indexAttr || indexAttr.count < 3) return null;
+        const positions = posAttr.array instanceof Float32Array ? posAttr.array : Float32Array.from(posAttr.array);
+        const uvs = uvAttr.array instanceof Float32Array ? uvAttr.array : Float32Array.from(uvAttr.array);
+        const sourceIndices = indexAttr.array;
+        const indices = sourceIndices instanceof Uint32Array ? sourceIndices : Uint32Array.from(sourceIndices);
+        const targetIndexCount = Math.max(3, Math.floor(indices.length * REDUCE_TARGET_RATIO / 3) * 3);
+        if (targetIndexCount >= indices.length) return geometry.clone();
+
+        let newIndices, error;
+        try {
+            [newIndices, error] = simplifier.simplifyWithAttributes(
+                indices,
+                positions,
+                3,
+                uvs,
+                2,
+                [REDUCE_UV_WEIGHT, REDUCE_UV_WEIGHT],
+                null,
+                targetIndexCount,
+                REDUCE_TARGET_ERROR,
+                ['LockBorder']
+            );
+        } catch (errorValue) {
+            console.warn('[Reduce] simplifyWithAttributes failed:', errorValue);
+            return null;
+        }
+        const [remap, uniqueVertexCount] = simplifier.compactMesh(newIndices);
+        const outPositions = new Float32Array(uniqueVertexCount * 3);
+        const outUVs = new Float32Array(uniqueVertexCount * 2);
+        for (let oldIndex = 0; oldIndex < remap.length; oldIndex++) {
+            const newIndex = remap[oldIndex];
+            if (newIndex === 0xffffffff || newIndex < 0) continue;
+            outPositions.set(positions.subarray(oldIndex * 3, oldIndex * 3 + 3), newIndex * 3);
+            outUVs.set(uvs.subarray(oldIndex * 2, oldIndex * 2 + 2), newIndex * 2);
+        }
+        const outIndices = new Uint32Array(newIndices.length);
+        outIndices.set(newIndices);
+
+        const out = new THREE.BufferGeometry();
+        out.setAttribute('position', new THREE.BufferAttribute(outPositions, 3));
+        out.setAttribute('uv', new THREE.BufferAttribute(outUVs, 2));
+        out.setIndex(new THREE.BufferAttribute(outIndices, 1));
+        out.computeVertexNormals();
+        out.computeBoundingBox();
+        out.computeBoundingSphere();
+        out.userData.simplifyError = error;
+        return out;
+    }
+
     // Masked vertices remain NaN so exports and point mode preserve invalid
     // pixels. three.js cannot derive raycast bounds from such an array, so use
     // only finite vertices for the mesh bounding volumes.
@@ -937,11 +1294,17 @@ const Viewer = (function () {
             ? { normalMap: getNormalTextureObject() }
             : {};
         if (disableColor) {
-            return new MaterialClass({ color: 0xffffff, side: THREE.DoubleSide, flatShading: false, ...lightingOptions });
+            return new MaterialClass(createMeshMaterialOptions({ color: 0xffffff, ...lightingOptions }));
         } else if (currentColorTexture) {
-            return new MaterialClass({ map: getTextureObject(), side: THREE.DoubleSide, flatShading: false, ...lightingOptions });
+            return new MaterialClass(createMeshMaterialOptions({ map: getTextureObject(), ...lightingOptions }));
         }
-        return new MaterialClass({ color: 0x888888, side: THREE.DoubleSide, flatShading: false, ...lightingOptions });
+        return new MaterialClass(createMeshMaterialOptions({ color: 0x888888, ...lightingOptions }));
+    }
+
+    function createMeshMaterialOptions(options) {
+        const result = { ...options, side: THREE.DoubleSide };
+        if (!disableLighting) result.flatShading = false;
+        return result;
     }
 
     function createPointsMaterial() {
@@ -1420,6 +1783,7 @@ const Viewer = (function () {
     // ---- 表示モード切替 ----
     function setPointsMode(on) {
         isPointsMode = on;
+        cancelReduction();
         createMesh(true);
     }
     function setPointSize(px) {
@@ -1439,6 +1803,12 @@ const Viewer = (function () {
     function setLighting(disabled) { disableLighting = disabled; updateMaterial(); }
     function setColorDisabled(disabled) { disableColor = disabled; createMesh(true); }
     function isPoints() { return isPointsMode; }
+
+    function setPolygonReductionEnabled(on) {
+        reducePolygons = !!on;
+        cancelReduction();
+        createMesh(true);
+    }
 
     // ---- エクスポート ----
     function getAlignmentTransform() {
@@ -1470,6 +1840,7 @@ const Viewer = (function () {
         const target = mesh || pointsMesh;
         if (!target) { alert('No mesh is loaded.'); return; }
         if (!currentColorTexture) { alert('No texture is available for OBJ export.'); return; }
+        await flushReduction();
         const base = sanitizeFileBase((currentBaseName || 'mesh').replace(/_worldposition$/, ''));
         const objName = `${base}.obj`;
         const mtlName = `${base}.mtl`;
@@ -1751,10 +2122,11 @@ const Viewer = (function () {
         return out;
     }
 
-    function exportGLB() {
+    async function exportGLB() {
         const source = mesh || pointsMesh;
         if (!source) { alert('No mesh is loaded.'); return; }
         if (!THREE.GLTFExporter) { alert('GLTFExporter failed to load.'); return; }
+        await flushReduction();
 
         const exportScene = new THREE.Scene();
         exportScene.name = 'ImageToMeshScene';
