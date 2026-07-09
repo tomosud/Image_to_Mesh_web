@@ -17,6 +17,8 @@ https://github.com/user-attachments/assets/9ee06a21-c0db-4ef7-a144-4e5478724f1f
 - WebGPU inference with automatic WASM fallback
 - RGB-guided high-resolution depth upsampling, capped at 2048 px on the long edge
 - Textured mesh, point-cloud, wireframe, and unlit display modes
+- Optional display-side polygon reduction using meshoptimizer in a Web Worker
+- Progress HUD for inference, depth post-processing, mesh generation, backfill, and polygon reduction
 - Estimated source-camera view
 - Three-point horizontal-plane direction adjustment
 - Adjustable masking and depth-edge cleanup
@@ -29,8 +31,21 @@ https://github.com/user-attachments/assets/9ee06a21-c0db-4ef7-a144-4e5478724f1f
 - A WebGPU-capable GPU is recommended
 - Internet access for the first model and library download
 - A browser-supported input image such as JPG, PNG, WebP, AVIF, GIF, or BMP
+- HTTPS or a local HTTP server. Module workers used by polygon reduction do not work from `file://`
 
 ViT-L requires substantial GPU and system memory. Use ViT-B or ViT-S if loading or inference fails.
+
+## GitHub Pages Compatibility
+
+The app is designed for static hosting and works on GitHub Pages.
+
+- All application files are static HTML, CSS, JavaScript, and model/library downloads
+- `js/reduce_worker.js` is loaded as a same-origin module worker with a relative URL
+- The worker imports `js/vendor/meshopt_simplifier.js` with a relative dynamic import
+- meshoptimizer's WASM payload is embedded in the vendored JavaScript file, so no extra `.wasm` MIME configuration is required
+- HTTPS on GitHub Pages satisfies browser requirements for WebGPU and module workers
+
+The same module-worker behavior is why local use must go through `run.bat` or another HTTP server instead of opening the file directly.
 
 ## Quick Start
 
@@ -166,6 +181,21 @@ Removes isolated connected face islands after depth-edge cutting.
 - Set `0` to keep all isolated islands
 - Higher values remove larger detached fragments
 
+### Reduce Polygons
+
+When **Reduce Polygons** is enabled, the viewer keeps the full generated mesh first, then reduces the displayed mesh asynchronously in a module Web Worker. OBJ and GLB export use the currently displayed geometry, so reduced display geometry is exported as reduced geometry.
+
+- Default: on
+- Target ratio: `5%` of source indices, subject to the error limit
+- Error limit: `0.02` in the adaptive screen/disparity simplification space
+- UVs and original vertex positions are preserved for retained vertices; the adaptive screen/disparity coordinates are used only to choose which triangles are removed
+- Main mesh and backfill boundaries are smoothed before simplification
+- Very thin boundary-only artifacts from smoothed/reduced edges are removed after simplification
+- Fill B is reduced but skips the boundary smoothing pass
+- If the worker or meshoptimizer fails to initialize, polygon reduction is disabled and the full-resolution display remains usable
+
+Reduction needs an HTTP(S) origin because it uses `js/reduce_worker.js` as a module worker. GitHub Pages and `run.bat` satisfy this requirement; opening `index.html` directly with `file://` does not.
+
 ## Display Controls
 
 - **Points Only**: switch between triangle mesh and point cloud
@@ -173,6 +203,7 @@ Removes isolated connected face islands after depth-edge cutting.
 - **Unlit**: show image colors without scene lighting
 - **No Color**: hide the source-image color
 - **Wireframe**: show mesh triangle edges
+- **Reduce Polygons**: asynchronously simplify the displayed mesh and exported OBJ/GLB geometry
 - **Reset View**: restore the estimated source-camera view
 - **Set Orbit Center** or `F`: click a visible mesh point to make it the orbit target while preserving the current viewing angle
 - **W/A/S/D** and **Shift/Ctrl**: keyboard parallel movement
@@ -189,6 +220,8 @@ Removes isolated connected face islands after depth-edge cutting.
 | Initial Depth (EXR) | Debug 32-bit FLOAT depth after initial high-resolution resize and before RGB-guided filtering |
 | Normal Map (PNG) | RGB tangent-space normal map generated from MoGe-2 normals |
 | Aligned WorldPos (EXR) | 32-bit FLOAT positions with `R=X`, `G=Y`, and `B=Z` |
+| Backfill WorldPos (EXR) | 32-bit FLOAT positions for the generated occlusion backfill layer |
+| Backfill Texture (PNG) | Texture generated for the occlusion backfill layer |
 | OBJ + Textures (ZIP) | ZIP containing OBJ, MTL, source-image texture PNG, tangent-space normal map PNG, and Backfill texture PNG when Backfill exists |
 | Scene GLB | Textured mesh with estimated source and current viewer cameras |
 | PNG (2048) | Current view rendered to a transparent 2048×2048 PNG |
@@ -207,7 +240,9 @@ Scene GLB contains:
 - Source-image texture and tangent-space normal map
 - GLB materials use the source/backfill color textures as emissive maps, with black base color and metallic set to `1.0`
 
-OBJ ZIP uses the same source-image texture and tangent-space normal map as the GLB. When Backfill exists, the OBJ also contains a `BackfillMesh` object and the ZIP includes its Backfill texture PNG.
+OBJ ZIP uses the same source-image texture and tangent-space normal map as the GLB. When Backfill exists, the OBJ also contains a `BackfillMesh` object and the ZIP includes its Backfill texture PNG. When Fill B exists, OBJ and GLB also include a `FillBMesh` object with its generated texture.
+
+If **Reduce Polygons** is enabled and reduction has completed, OBJ ZIP and Scene GLB export the reduced displayed geometry. Export waits for a pending reduction pass before packaging the files.
 
 Depth EXR remains in the original camera-depth coordinate system.
 
@@ -239,6 +274,17 @@ Depth EXR remains in the original camera-depth coordinate system.
 - Raise **Edge Threshold**.
 - Set Edge Threshold to `Off` for no edge snapping and splitting.
 - Set **Sky / Masked Area** to Apply Mask OFF if the validity mask removes useful areas.
+
+### Edge diamonds or thin sliver polygons remain
+
+The reduction worker removes boundary-only triangles and very thin boundary slivers after simplification. If artifacts are still visible, disable **Reduce Polygons** for full-resolution display/export, or increase **Edge Threshold** so fewer depth seams are created.
+
+### Polygon reduction does not run
+
+- Use GitHub Pages or a local HTTP server. Module workers do not run from `file://`.
+- Update Chrome or Edge.
+- Reload the page to clear stale cached worker scripts.
+- If the worker or meshoptimizer initialization fails, the app keeps working with full-resolution geometry.
 
 ### Rotation feels tilted or uses the wrong axis
 
