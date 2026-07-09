@@ -320,6 +320,30 @@ button:disabled {
     background: rgba(102, 126, 234, 0.35);
 }
 
+@keyframes orbit-center-blink {
+    0%, 100% { background: rgba(255, 110, 10, 0.85); border-color: #ff8c00; color: #fff; }
+    50%       { background: rgba(255, 110, 10, 0.2);  border-color: #ff8c00; color: #fff; }
+}
+
+#setOrbitCenter.hint {
+    animation: orbit-center-blink 1s ease-in-out infinite;
+    border-color: #ff8c00;
+    color: #fff;
+}
+
+#orbit-cursor-tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.78);
+    color: #fff;
+    font-size: 13px;
+    padding: 5px 11px;
+    border-radius: 6px;
+    white-space: nowrap;
+    z-index: 9999;
+    display: none;
+}
+
 #useHorizontalGrid {
     border-color: #ffad42;
     background: rgba(230, 118, 18, 0.9);

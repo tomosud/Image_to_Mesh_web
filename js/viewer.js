@@ -1076,17 +1076,45 @@ const Viewer = (function () {
     }
 
     // ---- Orbit center one-click selection ----
+    function _orbitCursorTooltipMove(e) {
+        const tip = document.getElementById('orbit-cursor-tooltip');
+        if (!tip) return;
+        tip.style.left = (e.clientX + 16) + 'px';
+        tip.style.top  = (e.clientY + 16) + 'px';
+    }
+
+    function _showOrbitCursorTooltip(show) {
+        const tip = document.getElementById('orbit-cursor-tooltip');
+        if (!tip) return;
+        if (show) {
+            tip.style.display = 'block';
+            window.addEventListener('mousemove', _orbitCursorTooltipMove);
+        } else {
+            tip.style.display = 'none';
+            window.removeEventListener('mousemove', _orbitCursorTooltipMove);
+        }
+    }
+
+    function startOrbitCenterHint() {
+        const btn = document.getElementById('setOrbitCenter');
+        if (btn) btn.classList.add('hint');
+    }
+
     function toggleOrbitCenterSelection() {
         if (!mesh && !pointsMesh) return;
         if (orbitCenterSelectionActive) {
             cancelOrbitCenterSelection();
             return;
         }
+        // ボタンを一度押したら点滅を止める
+        const btn = document.getElementById('setOrbitCenter');
+        if (btn) btn.classList.remove('hint');
         if (orbitPlaneAdjustmentOpen) cancelOrbitPlaneAdjustment(true);
         orbitCenterSelectionActive = true;
         pointerDownPosition = null;
         if (renderer) renderer.domElement.classList.add('selecting-orbit-center');
         updateOrbitCenterUI('Click a surface point for the orbit center. Press F or Esc to cancel.', true);
+        _showOrbitCursorTooltip(true);
     }
 
     function cancelOrbitCenterSelection() {
@@ -1094,6 +1122,7 @@ const Viewer = (function () {
         pointerDownPosition = null;
         if (renderer) renderer.domElement.classList.remove('selecting-orbit-center');
         updateOrbitCenterUI('', false);
+        _showOrbitCursorTooltip(false);
     }
 
     function updateOrbitCenterUI(message, active) {
@@ -1938,7 +1967,7 @@ const Viewer = (function () {
     }
 
     return {
-        init, setData, setBackfillLayer, setBackfillParallaxCutK, setFillBLayer, resetCamera, toggleOrbitCenterSelection,
+        init, setData, setBackfillLayer, setBackfillParallaxCutK, setFillBLayer, resetCamera, toggleOrbitCenterSelection, startOrbitCenterHint,
         toggleHorizontalGridAdjustment, useHorizontalGrid,
         setPointsMode, setPointSize, toggleWireframe,
         setLighting, setColorDisabled, isPoints,

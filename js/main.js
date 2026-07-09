@@ -297,6 +297,7 @@
                 },
                 currentNormalMap
             );
+            if (fromProcessImage) Viewer.startOrbitCenterHint();
             setDownloadEnabled(true);
             $('dlDepthInitial').disabled = !currentDepthUpsampleDebug;
             updateBackfill();
