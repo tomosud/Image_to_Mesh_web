@@ -5,12 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image to Mesh — World Position Viewer</title>
     <link rel="icon" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3e%3cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3e%3c/svg%3e">
-    <link rel="stylesheet" href="css/style.css?v=20260709-2">
+    <link rel="stylesheet" href="css/style.css?v=20260709-3">
 </head>
 <body>
     <div id="container">
         <canvas id="canvas"></canvas>
         <button id="toggleUI" type="button" aria-pressed="false">UI OFF</button>
+        <div id="progressHud" class="hidden" aria-live="polite">
+            <div id="progressTitle">Processing...</div>
+            <div id="progressDetail"></div>
+        </div>
         <a id="repoLink" href="https://github.com/tomosud/Image_to_Mesh_web" target="_blank" rel="noopener noreferrer">tomosud/Image_to_Mesh_web</a>
         <div id="captureFrame"></div>
 
@@ -297,10 +301,10 @@
     <script src="js/normalmap.js?v=20260620-13"></script>
     <script src="js/backfill.js?v=20260709-1"></script>
     <script src="js/fillb.js?v=20260708-2"></script>
-    <script src="js/viewer.js?v=20260709-3"></script>
+    <script src="js/viewer.js?v=20260709-8"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260705-1"></script>
-    <script src="js/main.js?v=20260709-2"></script>
+    <script src="js/main.js?v=20260709-4"></script>
     <div id="orbit-cursor-tooltip">Click to set orbit center</div>
 </body>
 </html>

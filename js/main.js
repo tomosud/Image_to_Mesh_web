@@ -43,6 +43,7 @@
         const overlay = $('loadingOverlay');
         if (show) {
             $('loadingText').textContent = text || 'Loading...';
+            setProgress(text || 'Loading...', formatProgressDetail(ratio));
             const prog = $('loadingProgress');
             if (ratio != null) {
                 prog.style.display = 'block';
@@ -53,8 +54,34 @@
             overlay.style.display = 'flex';
         } else {
             overlay.style.display = 'none';
+            clearProgress();
         }
     }
+
+    function formatProgressDetail(ratio) {
+        return ratio != null ? `${Math.round(ratio * 100)}%` : '';
+    }
+
+    function setProgress(title, detail) {
+        const hud = $('progressHud');
+        if (!hud) return;
+        if (!title) {
+            hud.classList.add('hidden');
+            return;
+        }
+        $('progressTitle').textContent = title;
+        $('progressDetail').textContent = detail || '';
+        hud.classList.remove('hidden');
+    }
+
+    function clearProgress() {
+        setProgress('', '');
+    }
+
+    window.AppProgress = {
+        set: setProgress,
+        clear: clearProgress
+    };
 
     function showUI() {
         $('dropZone').classList.add('hidden');
@@ -188,12 +215,15 @@
         recomputingPost = true;
         try {
             if (showProgress) showLoading(true, 'Recomputing high-resolution depth...');
+            setProgress('Depth: preparing post-process', 'Cleaning mask and preparing depth buffers');
             // metric scale 適用は常時。mask 適用は表示側 opts。
             const basePost = MogePost.process(currentMoge, { useMetric: true });
+            setProgress('Depth: upsampling', 'Refining metric depth before mesh generation');
             currentPost = await DepthUpsampler.process(basePost, currentImageData, getDepthUpsampleOpts());
             currentDepthUpsampleDebug = currentPost.debug || null;
             updateDepthUpsampleStatus(currentPost.upsampleInfo);
             const opts = getOpts();
+            setProgress('Depth: cleaning edges', `Mask ${opts.maskMode}, threshold ${opts.edgeThreshold.toFixed(4)}`);
             // エッジ画素の削除は EdgeSnap（スナップ+シーム分割）に置き換えたため、
             // cleanDepthMask は無効深度と mask の処理のみに使う（rtol=1 で削除Off）。
             // maskMode 'sky'/'remove' は mask を適用して実ジオメトリを確定し、
@@ -208,6 +238,7 @@
             );
             let skyBackdropMask = null;
             if (opts.maskMode === 'sky') {
+                setProgress('Depth: building sky backdrop', 'Filling sky or uncertain regions');
                 skyBackdropMask = new Uint8Array(cleanedMask);
                 const backdrop = MogePost.fillBackdrop(
                     currentPost.depth,
@@ -229,6 +260,7 @@
             // docs/archive/PLAN_EDGE_COLOR_HISTORY.md。将来の色パッチ用に配線は残す）。
             let uvSrcIndex = null;
             if (opts.edgeThreshold < 1) {
+                setProgress('Depth: snapping edge ramps', `Snap width ${opts.snapWidth}px`);
                 const snap = EdgeSnap.process({
                     depth: currentPost.depth,
                     points: currentPost.points,
@@ -242,6 +274,7 @@
                     uvSrcIndex = snap.uvSrcIndex;
                 }
             }
+            setProgress('World positions', `${currentPost.width} x ${currentPost.height}`);
             currentWP = WorldPos.fromCameraPoints(
                 currentPost.points,
                 currentPost.width,
@@ -249,6 +282,7 @@
                 cleanedMask,
                 { scale: 1.0, applyMask: true }
             );
+            setProgress('Normal map', 'Computing tangent-space normals');
             currentNormalMap = NormalMap.create(
                 currentPost.normal,
                 currentPost.points,
@@ -262,6 +296,7 @@
             currentPatchedImage = null;
             let colorSource = currentImageData;
             if (skyBackdropMask) {
+                setProgress('Texture: filling masked color', 'Preparing display texture');
                 colorSource = SkyMaskColorFill.apply({
                     image: colorSource,
                     validMask: skyBackdropMask,
@@ -271,6 +306,7 @@
                 }) || colorSource;
             }
             if (opts.edgeThreshold < 1) {
+                setProgress('Texture: patching edge colors', 'Reducing color fringes around cut edges');
                 currentPatchedImage = ColorPatch.apply({
                     image: colorSource,
                     depth: currentPost.depth,
@@ -282,6 +318,7 @@
             }
             currentPatchedImage = currentPatchedImage || (colorSource !== currentImageData ? colorSource : null);
             const colorTex = colorTexFromImageData(currentPatchedImage || currentImageData);
+            setProgress('Mesh: building viewer geometry', 'Creating main mesh and texture bindings');
             Viewer.setData(
                 currentWP.data,
                 currentWP.width,
@@ -300,7 +337,9 @@
             if (fromProcessImage) Viewer.startOrbitCenterHint();
             setDownloadEnabled(true);
             $('dlDepthInitial').disabled = !currentDepthUpsampleDebug;
+            setProgress('Backfill: occlusion layer', $('fillOcclusion').checked ? 'Generating hidden background fill' : 'Skipped');
             updateBackfill();
+            setProgress('Backfill: far backdrop', $('fillBackdropLayer').checked ? 'Generating far background layer' : 'Skipped');
             updateFillB();
         } finally {
             recomputingPost = false;
@@ -311,6 +350,7 @@
     function handleAsyncError(e) {
         console.error(e);
         showLoading(false);
+        clearProgress();
         alert('Processing failed:\n' + (e && e.message ? e.message : e));
     }
 
@@ -456,6 +496,7 @@
 
         try {
             showLoading(true, 'Loading image...');
+            setProgress('Image: loading source', file && file.name ? file.name : '');
             currentImageData = await readImageFile(file);
 
             if (!modelReady) {
@@ -480,10 +521,12 @@
             }
 
             showLoading(true, 'Estimating depth with MoGe-2...');
+            setProgress('Depth: running MoGe-2 inference', `${currentImageData.width} x ${currentImageData.height}, tokens ${getNumTokens()}`);
             lastNumTokens = getNumTokens();
             currentMoge = await Inference.run(currentImageData, lastNumTokens);
 
             showLoading(true, 'Computing high-resolution depth and world positions...');
+            setProgress('Depth: post-processing', 'Upsample, edge cleanup, world positions, normals');
             await recompute(false, true);
 
             const provider = Inference.getActiveProvider();
@@ -499,6 +542,7 @@
         } catch (e) {
             console.error(e);
             showLoading(false);
+            clearProgress();
             alert('Processing failed:\n' + (e && e.message ? e.message : e));
         } finally {
             processingImage = false;

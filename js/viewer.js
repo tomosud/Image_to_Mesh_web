@@ -43,13 +43,21 @@ const Viewer = (function () {
     let reductionTimer = null;
     let reductionGeneration = 0;
     let reductionRunPromise = null;
-    let meshoptSimplifierPromise = null;
-    let meshoptReductionDisabled = false;
+    let reduceWorker = null;
+    let reduceWorkerDisabled = false;
+    let reductionWorkerQueue = Promise.resolve();
+    const reductionWorkerRequests = new Map();
 
+    const REDUCE_WORKER_VERSION = '20260709-8'; // Keep in sync with index.html viewer.js cache-buster.
     const REDUCE_DEBOUNCE_MS = 400;
-    const REDUCE_TARGET_RATIO = 0.1;
-    const REDUCE_TARGET_ERROR = 0.01;
+    const REDUCE_TARGET_RATIO = 0.05;
+    const REDUCE_TARGET_ERROR = 0.02;
     const REDUCE_UV_WEIGHT = 1.0;
+    const DEPTH_AXIS_WEIGHT = 0.5;
+    const UNLOCK_FAR_BORDERS = true;
+    const FAR_BORDER_DISP_RATIO = 1.0;
+    const CLEAN_BOUNDARY_ARTIFACTS = true;
+    const BOUNDARY_ARTIFACT_MIN_ALTITUDE_CELLS = 0.75;
     const SMOOTH_ITERS = 3;
     const SMOOTH_LAMBDA = 0.5;
     const SMOOTH_CLAMP_CELLS = 0.75;
@@ -892,7 +900,7 @@ const Viewer = (function () {
     }
 
     function scheduleReduction() {
-        if (!reducePolygons || isPointsMode || meshoptReductionDisabled) {
+        if (!reducePolygons || isPointsMode || reduceWorkerDisabled) {
             cancelReduction();
             return;
         }
@@ -912,7 +920,7 @@ const Viewer = (function () {
     }
 
     async function flushReduction() {
-        if (!reducePolygons || isPointsMode || meshoptReductionDisabled) return;
+        if (!reducePolygons || isPointsMode || reduceWorkerDisabled) return;
         if (reductionTimer != null) {
             clearTimeout(reductionTimer);
             reductionTimer = null;
@@ -927,295 +935,189 @@ const Viewer = (function () {
         }
     }
 
-    async function loadMeshoptSimplifier() {
-        if (meshoptReductionDisabled) return null;
-        if (!meshoptSimplifierPromise) {
-            meshoptSimplifierPromise = import('./vendor/meshopt_simplifier.js')
-                .then(async (module) => {
-                    const simplifier = module.MeshoptSimplifier;
-                    if (!simplifier || simplifier.supported === false) throw new Error('MeshoptSimplifier is not supported');
-                    await simplifier.ready;
-                    return simplifier;
-                })
-                .catch((error) => {
-                    meshoptReductionDisabled = true;
-                    console.warn('[Reduce] meshoptimizer disabled:', error);
-                    return null;
-                });
-        }
-        return meshoptSimplifierPromise;
-    }
-
     async function runReduction(token) {
-        if (token !== reductionGeneration || !reducePolygons || isPointsMode || meshoptReductionDisabled) return;
-        const simplifier = await loadMeshoptSimplifier();
-        if (!simplifier || token !== reductionGeneration || !reducePolygons || isPointsMode) return;
+        if (token !== reductionGeneration || !reducePolygons || isPointsMode || reduceWorkerDisabled) return;
         const started = performance.now();
-        reduceDisplayMesh(mesh, 'main', simplifier, true, token);
-        reduceDisplayMesh(backfillMesh, 'backfill', simplifier, true, token);
-        reduceDisplayMesh(fillBMesh, 'fillb', simplifier, false, token);
-        const elapsed = performance.now() - started;
-        console.log(`[Reduce] done ${elapsed.toFixed(1)}ms`);
+        setViewerProgress('Reducing polygons', 'Preparing mesh reduction jobs');
+        try {
+            await reduceDisplayMesh(mesh, 'main', true, token);
+            if (token !== reductionGeneration || !reducePolygons || isPointsMode || reduceWorkerDisabled) return;
+            await reduceDisplayMesh(backfillMesh, 'backfill', true, token);
+            if (token !== reductionGeneration || !reducePolygons || isPointsMode || reduceWorkerDisabled) return;
+            await reduceDisplayMesh(fillBMesh, 'fillb', false, token);
+            const elapsed = performance.now() - started;
+            console.log(`[Reduce] done ${elapsed.toFixed(1)}ms`);
+            setViewerProgress('Reducing polygons', `Done in ${elapsed.toFixed(0)}ms`);
+        } finally {
+            setTimeout(() => {
+                if (token === reductionGeneration && reducePolygons && !isPointsMode) clearViewerProgress();
+            }, 700);
+        }
     }
 
-    function reduceDisplayMesh(target, name, simplifier, smooth, token) {
+    async function reduceDisplayMesh(target, name, smooth, token) {
         if (token !== reductionGeneration || !target || !target.isMesh || !target.geometry || !target.geometry.index) return;
         const sourceGeometry = target.geometry;
-        const beforeFaces = sourceGeometry.index.count / 3;
-        const work = createFiniteCompactGeometry(sourceGeometry);
-        if (!work || !work.index || work.index.count === 0) {
-            if (work) work.dispose();
-            return;
-        }
-        if (smooth) smoothBoundaryScreenSpace(work);
-        const reduced = simplifyCompactGeometry(work, simplifier);
-        work.dispose();
-        if (!reduced || token !== reductionGeneration || !reducePolygons || isPointsMode) {
-            if (reduced) reduced.dispose();
+        const posAttr = sourceGeometry.getAttribute('position');
+        const uvAttr = sourceGeometry.getAttribute('uv');
+        const indexAttr = sourceGeometry.getIndex();
+        if (!posAttr || !uvAttr || !indexAttr) return;
+        setViewerProgress('Reducing polygons', `${name}: ${Math.round(indexAttr.count / 3)} faces`);
+
+        const request = {
+            token,
+            name,
+            positions: posAttr.array.slice(),
+            uvs: uvAttr.array.slice(),
+            index: indexAttr.array.slice(),
+            smooth,
+            params: {
+                fx: currentIntrinsics ? currentIntrinsics.fx : null,
+                fy: currentIntrinsics ? currentIntrinsics.fy : null,
+                cx: currentIntrinsics ? currentIntrinsics.cx : null,
+                cy: currentIntrinsics ? currentIntrinsics.cy : null,
+                gridW: 0,
+                gridH: 0,
+                SMOOTH_ITERS,
+                SMOOTH_LAMBDA,
+                SMOOTH_CLAMP_CELLS,
+                REDUCE_TARGET_RATIO,
+                REDUCE_TARGET_ERROR,
+                REDUCE_UV_WEIGHT,
+                DEPTH_AXIS_WEIGHT,
+                UNLOCK_FAR_BORDERS,
+                FAR_BORDER_DISP_RATIO,
+                CLEAN_BOUNDARY_ARTIFACTS,
+                BOUNDARY_ARTIFACT_MIN_ALTITUDE_CELLS
+            }
+        };
+        const response = await queueReductionJob(request);
+        if (!response || !response.ok || token !== reductionGeneration || !reducePolygons || isPointsMode) return;
+
+        const reduced = new THREE.BufferGeometry();
+        reduced.setAttribute('position', new THREE.BufferAttribute(response.positions, 3));
+        reduced.setAttribute('uv', new THREE.BufferAttribute(response.uvs, 2));
+        reduced.setAttribute('normal', new THREE.BufferAttribute(response.normals, 3));
+        reduced.setIndex(new THREE.BufferAttribute(response.index, 1));
+        reduced.computeBoundingBox();
+        reduced.computeBoundingSphere();
+        reduced.userData.simplifyError = response.stats ? response.stats.error : undefined;
+
+        if (token !== reductionGeneration || !reducePolygons || isPointsMode) {
+            reduced.dispose();
             return;
         }
         const old = target.geometry;
         target.geometry = reduced;
         old.dispose();
-        const afterFaces = reduced.index ? reduced.index.count / 3 : 0;
-        const error = Number.isFinite(reduced.userData.simplifyError) ? reduced.userData.simplifyError.toFixed(6) : 'n/a';
-        console.log(`[Reduce] ${name} ${beforeFaces} -> ${afterFaces} faces, error=${error}`);
+        const stats = response.stats || {};
+        const facesBefore = Number.isFinite(stats.facesBefore) ? stats.facesBefore : sourceGeometry.index.count / 3;
+        const facesAfter = Number.isFinite(stats.facesAfter) ? stats.facesAfter : reduced.index.count / 3;
+        const error = Number.isFinite(stats.error) ? stats.error.toFixed(6) : 'n/a';
+        const ms = Number.isFinite(stats.ms) ? `, worker=${stats.ms.toFixed(1)}ms` : '';
+        const dispRef = Number.isFinite(stats.dispRef) ? stats.dispRef.toFixed(6) : 'n/a';
+        const locked = Number.isFinite(stats.lockedBorderVerts) ? stats.lockedBorderVerts : 0;
+        const border = Number.isFinite(stats.totalBorderVerts) ? stats.totalBorderVerts : 0;
+        const artifacts = Number.isFinite(stats.removedArtifactFaces) ? `, artifacts=${stats.removedArtifactFaces}` : '';
+        console.log(`[Reduce] ${name} ${facesBefore} -> ${facesAfter} faces, error=${error}, dispRef=${dispRef}, lockedBorder=${locked}/${border}${artifacts}${ms}`);
+        setViewerProgress('Reducing polygons', `${name}: ${facesBefore} -> ${facesAfter} faces`);
     }
 
-    function createFiniteCompactGeometry(sourceGeometry) {
-        const posAttr = sourceGeometry.getAttribute('position');
-        const uvAttr = sourceGeometry.getAttribute('uv');
-        const indexAttr = sourceGeometry.getIndex();
-        if (!posAttr || !uvAttr || !indexAttr) return null;
-        const sourcePositions = posAttr.array;
-        const sourceUVs = uvAttr.array;
-        const sourceIndices = indexAttr.array;
-        const sourceVertexCount = posAttr.count;
-        const remap = new Int32Array(sourceVertexCount);
-        remap.fill(-1);
-        const positions = new Float32Array(sourceVertexCount * 3);
-        const uvs = new Float32Array(sourceVertexCount * 2);
-        const indices = new Uint32Array(sourceIndices.length);
-        let vertexCount = 0;
-        let indexCount = 0;
-
-        for (let i = 0; i < sourceIndices.length; i += 3) {
-            const a = sourceIndices[i], b = sourceIndices[i + 1], c = sourceIndices[i + 2];
-            if (!isFiniteSourceVertex(sourcePositions, a) ||
-                !isFiniteSourceVertex(sourcePositions, b) ||
-                !isFiniteSourceVertex(sourcePositions, c)) {
-                continue;
-            }
-            indices[indexCount++] = compactSourceVertex(a);
-            indices[indexCount++] = compactSourceVertex(b);
-            indices[indexCount++] = compactSourceVertex(c);
+    function setViewerProgress(title, detail) {
+        if (!reducePolygons) return;
+        if (window.AppProgress && typeof window.AppProgress.set === 'function') {
+            window.AppProgress.set(title, detail || '');
+            return;
         }
-        if (indexCount === 0) return null;
-
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions.slice(0, vertexCount * 3), 3));
-        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs.slice(0, vertexCount * 2), 2));
-        geometry.setIndex(new THREE.BufferAttribute(indices.slice(0, indexCount), 1));
-        geometry.computeVertexNormals();
-        geometry.computeBoundingBox();
-        geometry.computeBoundingSphere();
-        return geometry;
-
-        function compactSourceVertex(sourceIndex) {
-            let outIndex = remap[sourceIndex];
-            if (outIndex >= 0) return outIndex;
-            outIndex = vertexCount++;
-            remap[sourceIndex] = outIndex;
-            positions.set(sourcePositions.subarray(sourceIndex * 3, sourceIndex * 3 + 3), outIndex * 3);
-            uvs.set(sourceUVs.subarray(sourceIndex * 2, sourceIndex * 2 + 2), outIndex * 2);
-            return outIndex;
-        }
+        const hud = document.getElementById('progressHud');
+        const progressTitle = document.getElementById('progressTitle');
+        const progressDetail = document.getElementById('progressDetail');
+        if (!hud || !progressTitle || !progressDetail) return;
+        progressTitle.textContent = title || '';
+        progressDetail.textContent = detail || '';
+        hud.classList.toggle('hidden', !title);
     }
 
-    function isFiniteSourceVertex(positions, vertexIndex) {
-        const pi = vertexIndex * 3;
-        return Number.isFinite(positions[pi]) &&
-            Number.isFinite(positions[pi + 1]) &&
-            Number.isFinite(positions[pi + 2]);
+    function clearViewerProgress() {
+        if (window.AppProgress && typeof window.AppProgress.clear === 'function') {
+            window.AppProgress.clear();
+            return;
+        }
+        const hud = document.getElementById('progressHud');
+        if (hud) hud.classList.add('hidden');
     }
 
-    function smoothBoundaryScreenSpace(geometry) {
-        if (!hasValidIntrinsics(currentIntrinsics) || !geometry.index) return;
-        const positions = geometry.attributes.position.array;
-        const uvs = geometry.attributes.uv.array;
-        const vertexCount = geometry.attributes.position.count;
-        const boundaryNeighbors = collectBoundaryNeighbors(geometry);
-        const u0 = new Float32Array(vertexCount);
-        const v0 = new Float32Array(vertexCount);
-        const u = new Float32Array(vertexCount);
-        const v = new Float32Array(vertexCount);
-        const zValues = new Float32Array(vertexCount);
-        const movable = new Uint8Array(vertexCount);
-        const { fx, fy, cx, cy } = currentIntrinsics;
-        const dims = inferGeometryGridSize(uvs, vertexCount);
-        const maxStep = SMOOTH_CLAMP_CELLS;
-
-        for (let i = 0; i < vertexCount; i++) {
-            const pi = i * 3;
-            const z = positions[pi + 2];
-            zValues[i] = z;
-            if (!Number.isFinite(z) || Math.abs(z) < 1e-8) {
-                u0[i] = u[i] = uvs[i * 2];
-                v0[i] = v[i] = 1 - uvs[i * 2 + 1];
-                continue;
-            }
-            u0[i] = cx + (-positions[pi] / z) * fx;
-            v0[i] = cy + (-positions[pi + 1] / z) * fy;
-            u[i] = u0[i];
-            v[i] = v0[i];
-            if (!Number.isFinite(u0[i]) || !Number.isFinite(v0[i])) continue;
-            const neighbors = boundaryNeighbors[i];
-            if (!neighbors || neighbors.length !== 2) continue;
-            if (isOuterFrameVertex(u0[i], v0[i], dims.width, dims.height)) continue;
-            movable[i] = 1;
-        }
-
-        for (let iter = 0; iter < SMOOTH_ITERS; iter++) {
-            const nextU = new Float32Array(u);
-            const nextV = new Float32Array(v);
-            for (let i = 0; i < vertexCount; i++) {
-                if (!movable[i]) continue;
-                const neighbors = boundaryNeighbors[i];
-                const targetU = (u[neighbors[0]] + u[neighbors[1]]) * 0.5;
-                const targetV = (v[neighbors[0]] + v[neighbors[1]]) * 0.5;
-                let candidateU = u[i] + (targetU - u[i]) * SMOOTH_LAMBDA;
-                let candidateV = v[i] + (targetV - v[i]) * SMOOTH_LAMBDA;
-                const cellDx = (candidateU - u0[i]) * Math.max(1, dims.width - 1);
-                const cellDy = (candidateV - v0[i]) * Math.max(1, dims.height - 1);
-                const cellLen = Math.hypot(cellDx, cellDy);
-                if (cellLen > maxStep) {
-                    const scale = maxStep / cellLen;
-                    candidateU = u0[i] + (candidateU - u0[i]) * scale;
-                    candidateV = v0[i] + (candidateV - v0[i]) * scale;
-                }
-                nextU[i] = candidateU;
-                nextV[i] = candidateV;
-            }
-            u.set(nextU);
-            v.set(nextV);
-        }
-
-        let moved = false;
-        for (let i = 0; i < vertexCount; i++) {
-            if (!movable[i]) continue;
-            const du = u[i] - u0[i];
-            const dv = v[i] - v0[i];
-            if (Math.abs(du) < 1e-8 && Math.abs(dv) < 1e-8) continue;
-            const pi = i * 3;
-            const z = zValues[i];
-            positions[pi] = -((u[i] - cx) / fx) * z;
-            positions[pi + 1] = -((v[i] - cy) / fy) * z;
-            uvs[i * 2] = Math.max(0, Math.min(1, uvs[i * 2] + du));
-            uvs[i * 2 + 1] = Math.max(0, Math.min(1, uvs[i * 2 + 1] - dv));
-            moved = true;
-        }
-        if (!moved) return;
-        geometry.attributes.position.needsUpdate = true;
-        geometry.attributes.uv.needsUpdate = true;
-        geometry.computeVertexNormals();
-        geometry.computeBoundingBox();
-        geometry.computeBoundingSphere();
-    }
-
-    function collectBoundaryNeighbors(geometry) {
-        const idx = geometry.index.array;
-        const vertexCount = geometry.attributes.position.count;
-        const edgeUse = new Map();
-        const neighbors = Array.from({ length: vertexCount }, () => []);
-        for (let i = 0; i < idx.length; i += 3) {
-            addEdgeUse(edgeUse, idx[i], idx[i + 1]);
-            addEdgeUse(edgeUse, idx[i + 1], idx[i + 2]);
-            addEdgeUse(edgeUse, idx[i + 2], idx[i]);
-        }
-        edgeUse.forEach((count, key) => {
-            if (count !== 1) return;
-            const a = Math.floor(key / EDGE_KEY_STRIDE);
-            const b = key - a * EDGE_KEY_STRIDE;
-            neighbors[a].push(b);
-            neighbors[b].push(a);
+    function queueReductionJob(request) {
+        const waitForPrior = reductionWorkerQueue.catch(() => {});
+        const run = waitForPrior.then(() => {
+            if (request.token !== reductionGeneration || !reducePolygons || isPointsMode || reduceWorkerDisabled) return null;
+            return postReductionJob(request);
         });
-        return neighbors;
+        reductionWorkerQueue = run.catch(() => {});
+        return run;
     }
 
-    function inferGeometryGridSize(uvs, vertexCount) {
-        let minPositiveDu = Infinity;
-        let minPositiveDv = Infinity;
-        let prevU = uvs[0], prevV = uvs[1];
-        for (let i = 1; i < vertexCount; i++) {
-            const u = uvs[i * 2], v = uvs[i * 2 + 1];
-            const du = Math.abs(u - prevU);
-            const dv = Math.abs(v - prevV);
-            if (du > 1e-7) minPositiveDu = Math.min(minPositiveDu, du);
-            if (dv > 1e-7) minPositiveDv = Math.min(minPositiveDv, dv);
-            prevU = u; prevV = v;
-        }
-        const width = Number.isFinite(minPositiveDu) ? Math.max(2, Math.round(1 / minPositiveDu)) : Math.max(2, Math.round(Math.sqrt(vertexCount)));
-        const height = Number.isFinite(minPositiveDv) ? Math.max(2, Math.round(1 / minPositiveDv)) : Math.max(2, Math.round(vertexCount / width));
-        return { width, height };
+    function postReductionJob(request) {
+        const worker = ensureReduceWorker();
+        if (!worker) return Promise.resolve(null);
+        const key = `${request.token}:${request.name}`;
+        return new Promise((resolve) => {
+            reductionWorkerRequests.set(key, resolve);
+            try {
+                worker.postMessage(request, [
+                    request.positions.buffer,
+                    request.uvs.buffer,
+                    request.index.buffer
+                ]);
+            } catch (error) {
+                reductionWorkerRequests.delete(key);
+                disableReduceWorker(error);
+                resolve(null);
+            }
+        });
     }
 
-    function isOuterFrameVertex(u, v, width, height) {
-        const uPad = 1 / Math.max(1, width);
-        const vPad = 1 / Math.max(1, height);
-        return u <= uPad || u >= 1 - uPad || v <= vPad || v >= 1 - vPad;
-    }
-
-    function simplifyCompactGeometry(geometry, simplifier) {
-        const posAttr = geometry.getAttribute('position');
-        const uvAttr = geometry.getAttribute('uv');
-        const indexAttr = geometry.getIndex();
-        if (!posAttr || !uvAttr || !indexAttr || indexAttr.count < 3) return null;
-        const positions = posAttr.array instanceof Float32Array ? posAttr.array : Float32Array.from(posAttr.array);
-        const uvs = uvAttr.array instanceof Float32Array ? uvAttr.array : Float32Array.from(uvAttr.array);
-        const sourceIndices = indexAttr.array;
-        const indices = sourceIndices instanceof Uint32Array ? sourceIndices : Uint32Array.from(sourceIndices);
-        const targetIndexCount = Math.max(3, Math.floor(indices.length * REDUCE_TARGET_RATIO / 3) * 3);
-        if (targetIndexCount >= indices.length) return geometry.clone();
-
-        let newIndices, error;
+    function ensureReduceWorker() {
+        if (reduceWorkerDisabled) return null;
+        if (reduceWorker) return reduceWorker;
         try {
-            [newIndices, error] = simplifier.simplifyWithAttributes(
-                indices,
-                positions,
-                3,
-                uvs,
-                2,
-                [REDUCE_UV_WEIGHT, REDUCE_UV_WEIGHT],
-                null,
-                targetIndexCount,
-                REDUCE_TARGET_ERROR,
-                ['LockBorder']
-            );
-        } catch (errorValue) {
-            console.warn('[Reduce] simplifyWithAttributes failed:', errorValue);
+            reduceWorker = new Worker(`js/reduce_worker.js?v=${REDUCE_WORKER_VERSION}`, { type: 'module' });
+        } catch (error) {
+            disableReduceWorker(error);
             return null;
         }
-        const [remap, uniqueVertexCount] = simplifier.compactMesh(newIndices);
-        const outPositions = new Float32Array(uniqueVertexCount * 3);
-        const outUVs = new Float32Array(uniqueVertexCount * 2);
-        for (let oldIndex = 0; oldIndex < remap.length; oldIndex++) {
-            const newIndex = remap[oldIndex];
-            if (newIndex === 0xffffffff || newIndex < 0) continue;
-            outPositions.set(positions.subarray(oldIndex * 3, oldIndex * 3 + 3), newIndex * 3);
-            outUVs.set(uvs.subarray(oldIndex * 2, oldIndex * 2 + 2), newIndex * 2);
-        }
-        const outIndices = new Uint32Array(newIndices.length);
-        outIndices.set(newIndices);
+        reduceWorker.onmessage = (event) => {
+            const data = event.data || {};
+            const key = `${data.token}:${data.name}`;
+            const resolve = reductionWorkerRequests.get(key);
+            if (!resolve) return;
+            reductionWorkerRequests.delete(key);
+            if (!data.ok) {
+                disableReduceWorker(data.message || 'worker job failed');
+                resolve(null);
+                return;
+            }
+            resolve(data);
+        };
+        reduceWorker.onerror = (event) => {
+            disableReduceWorker(event.message || event);
+        };
+        reduceWorker.onmessageerror = () => {
+            disableReduceWorker('worker message error');
+        };
+        return reduceWorker;
+    }
 
-        const out = new THREE.BufferGeometry();
-        out.setAttribute('position', new THREE.BufferAttribute(outPositions, 3));
-        out.setAttribute('uv', new THREE.BufferAttribute(outUVs, 2));
-        out.setIndex(new THREE.BufferAttribute(outIndices, 1));
-        out.computeVertexNormals();
-        out.computeBoundingBox();
-        out.computeBoundingSphere();
-        out.userData.simplifyError = error;
-        return out;
+    function disableReduceWorker(error) {
+        if (reduceWorkerDisabled) return;
+        reduceWorkerDisabled = true;
+        console.warn('[Reduce] worker disabled:', error);
+        if (reduceWorker) {
+            reduceWorker.terminate();
+            reduceWorker = null;
+        }
+        reductionWorkerRequests.forEach((resolve) => resolve(null));
+        reductionWorkerRequests.clear();
     }
 
     // Masked vertices remain NaN so exports and point mode preserve invalid
