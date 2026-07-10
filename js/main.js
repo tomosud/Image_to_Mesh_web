@@ -292,6 +292,13 @@
                     currentPost.depth = snap.depth;
                     currentPost.points = snap.points;
                     uvSrcIndex = snap.uvSrcIndex;
+                    // Snap Width を超えた未解決ランプ画素を無効化した validMask（TASK_G G-1）。
+                    // 以後の WorldPos / NormalMap / ColorPatch / backfill はこれを使う。
+                    // 無効画素は面が張られず、backfill が holeMask として裏から埋める。
+                    if (snap.validMask) {
+                        cleanedMask = snap.validMask;
+                        currentPost.cleanedMask = cleanedMask;
+                    }
                 }
             }
             setProgress('World positions', `${currentPost.width} x ${currentPost.height}`);

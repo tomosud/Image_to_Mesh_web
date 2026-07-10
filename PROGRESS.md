@@ -51,6 +51,30 @@
 - Backfill Far Priority: `12px`
 - SkyMaskColorFill inner ring: `4px`
 
+## 途中状態: シルエットエッジの前後スパイク対策（TASK G）
+
+2026-07-10 調査: シルエットで前後へ伸びる櫛状スパイクの主因を「EdgeSnap の Snap Width を
+超えて残った未解決の中間深度画素」と特定（ユーザー提供の Depth EXR 断面で崖面の中間深度の
+歯を確認。Depth (EXR) ダウンロードは JBU→mask→Sky Backdrop→EdgeSnap 適用済みの最終 depth
+そのもの）。原因分析と段階計画は [docs/tasks/TASK_G_EDGE_SPIKE.md](docs/tasks/TASK_G_EDGE_SPIKE.md)。
+
+- **G-1 実装済み**: EdgeSnap 未解決画素を無効化し、面を張らず backfill に
+  裏打ちさせる（edgesnap.js `INVALIDATE_UNRESOLVED`、false で従来動作）。
+  `[EdgeSnap]` ログに `invalidated` を追加
+- 2026-07-10 実機確認: G-1 単独では変化なし。毛・草などソフト輪郭の重なりは
+  「数十px のなだらかなランプ」（1〜2%/px）で、隣接対（5%）にも窓検出（±3px 両側12%）
+  にも掛からず flagged にならないため
+- **G-6 実装済み・実機確認待ち**: 行/列走査で「短距離（≤48px）の同符号 run で
+  総 disparity 変化 > 0.25×中央値 disparity」をフラグ追加（長い連続斜面＝床は run 長で
+  除外）。しきい値は**視差基準**（深度比ではなく disparity 差。遠景は拾わず近景は
+  小さな深度比でも拾う）。フラグ後は吸着 → 未解決は G-1 無効化 → backfill 裏打ちの
+  既存経路。`[EdgeSnap]` ログに `rampFlagged` を追加。Fill Occlusion ON が前提
+- 確認ポイント: ソフト輪郭のスパイク消失 / 細い毛・枝が消えすぎないか /
+  無効化帯を backfill が埋めるか / 空の多い画像（中央値 disparity が空側へ落ちて
+  しきい値が緩みすぎないか）/ `rampFlagged`・`invalidated` の件数
+- 未着手: G-2（主メッシュ面分割の視差基準化 + backfill 種検出の整合。方針変更済み、
+  TASK_G 参照）、G-3（引き伸ばし率カット）、G-5（backfill Far Clamp 既定の見直し）
+
 ## 途中状態: Backfill 伸長の調整中
 
 2026-07-08 実機確認結果: 平面フィット延長 + ブリッジ統合 + カーテンクランプで大幅改善
