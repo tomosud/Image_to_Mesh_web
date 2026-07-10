@@ -113,12 +113,18 @@ const EdgeSnap = (function () {
             const dispMed = samples.length ? samples[samples.length >> 1] : 0;
             const rampTotalMin = RAMP_TOTAL_K * dispMed;
             const rampStepMin = RAMP_STEP_MIN_K * dispMed;
+            // run の「終わり方」で膜と実在の折り目を区別する:
+            // - 膜（ソフトなオクルージョンエッジ）は両端が台地（勾配ほぼ0）で終わる
+            // - 布の折り目・接地際・尾根は符号反転で終わる（下り→谷底→上り）。これは
+            //   連続面の実在ジオメトリなので切ってはいけない（近接シーンで穴になる）
+            // 両端とも「台地 or データ境界」で終わる run だけをフラグする。副次効果として
+            // 細い毛・枝（下り+上りが隣接）も両 run が符号反転端を持つため保護される。
             const scan = (len, count, idx) => {
                 for (let s = 0; s < count; s++) {
-                    let runStart = -1, runSign = 0, runSum = 0;
-                    let prev = -1, prevJ = -1;
-                    const flush = (endPos) => {
-                        if (runStart >= 0) {
+                    let runStart = -1, runSign = 0, runSum = 0, runStartOk = false;
+                    let prev = -1, prevJ = -1, prevStepSign = 0;
+                    const flush = (endPos, endOk) => {
+                        if (runStart >= 0 && runStartOk && endOk) {
                             const runLen = endPos - runStart;
                             if (runLen >= 2 && runLen <= RAMP_MAX_PX && Math.abs(runSum) > rampTotalMin) {
                                 for (let p = runStart; p <= endPos; p++) {
@@ -127,27 +133,31 @@ const EdgeSnap = (function () {
                                 }
                             }
                         }
-                        runStart = -1; runSign = 0; runSum = 0;
+                        runStart = -1; runSign = 0; runSum = 0; runStartOk = false;
                     };
                     for (let p = 0; p < len; p++) {
                         const j = idx(s, p);
                         if (!validMask[j] || !Number.isFinite(dispArr[j])) {
-                            flush(prev);
-                            prev = -1; prevJ = -1;
+                            flush(prev, true);            // データ境界は台地扱い
+                            prev = -1; prevJ = -1; prevStepSign = 0;
                             continue;
                         }
-                        if (prev < 0) { prev = p; prevJ = j; continue; }
+                        if (prev < 0) { prev = p; prevJ = j; prevStepSign = 0; continue; }
                         const step = dispArr[j] - dispArr[prevJ];
                         const sign = step > rampStepMin ? 1 : step < -rampStepMin ? -1 : 0;
                         if (sign !== 0 && sign === runSign) {
                             runSum += step;
                         } else {
-                            flush(prev);
-                            if (sign !== 0) { runStart = prev; runSign = sign; runSum = step; }
+                            flush(prev, sign === 0);      // 台地で終われば ok、符号反転なら折り目
+                            if (sign !== 0) {
+                                runStart = prev; runSign = sign; runSum = step;
+                                runStartOk = prevStepSign === 0;   // 台地から始まる run だけ
+                            }
                         }
+                        prevStepSign = sign;
                         prev = p; prevJ = j;
                     }
-                    flush(prev);
+                    flush(prev, true);                    // 行/列末尾は台地扱い
                 }
             };
             if (dispMed > 0) {
