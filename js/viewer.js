@@ -47,6 +47,10 @@ const Viewer = (function () {
     let reduceWorkerDisabled = false;
     let reductionWorkerQueue = Promise.resolve();
     const reductionWorkerRequests = new Map();
+    let fpsFrameCount = 0;
+    let fpsLastSampleTime = 0;
+    let fpsValue = 0;
+    let perfHudLastUpdate = 0;
 
     const REDUCE_WORKER_VERSION = '20260709-8'; // Keep in sync with index.html viewer.js cache-buster.
     const REDUCE_DEBOUNCE_MS = 400;
@@ -119,15 +123,102 @@ const Viewer = (function () {
 
     function animate() {
         requestAnimationFrame(animate);
+        const now = performance.now();
+        sampleFps(now);
         updateKeyboardMovement();
         if (controls) controls.update();
         if (renderer) renderer.render(scene, camera);
+        updatePerfHud(now);
     }
 
     function onWindowResize() {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function sampleFps(now) {
+        fpsFrameCount++;
+        if (!fpsLastSampleTime) {
+            fpsLastSampleTime = now;
+            return;
+        }
+        const elapsed = now - fpsLastSampleTime;
+        if (elapsed >= 500) {
+            fpsValue = fpsFrameCount * 1000 / elapsed;
+            fpsFrameCount = 0;
+            fpsLastSampleTime = now;
+        }
+    }
+
+    function updatePerfHud(now, force) {
+        if (!force && now - perfHudLastUpdate < 500) return;
+        perfHudLastUpdate = now;
+        const hud = document.getElementById('perfHud');
+        if (!hud) return;
+        if (!currentWorldPosData) {
+            hud.classList.add('hidden');
+            return;
+        }
+
+        setText('perfFps', fpsValue > 0 ? String(Math.round(fpsValue)) : '--');
+        setText('perfMemory', getJsHeapText());
+        const renderInfo = renderer && renderer.info ? renderer.info.render : null;
+        const calls = renderInfo && Number.isFinite(renderInfo.calls) ? renderInfo.calls : 0;
+        const tris = renderInfo && Number.isFinite(renderInfo.triangles) ? renderInfo.triangles : countVisibleFaces();
+        setText('perfDraw', `${formatCount(tris)} / ${calls}`);
+        setText('perfGrid', `${currentWorldPosData.width}x${currentWorldPosData.height}`);
+        setText('perfLoad', getLoadText());
+        hud.classList.remove('hidden');
+    }
+
+    function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+
+    function getJsHeapText() {
+        const memory = typeof performance !== 'undefined' ? performance.memory : null;
+        if (!memory || !Number.isFinite(memory.usedJSHeapSize)) return 'n/a';
+        const used = formatBytes(memory.usedJSHeapSize);
+        const limit = Number.isFinite(memory.jsHeapSizeLimit) ? formatBytes(memory.jsHeapSizeLimit) : 'n/a';
+        return `${used}/${limit}`;
+    }
+
+    function formatBytes(bytes) {
+        if (!(bytes >= 0)) return 'n/a';
+        const mb = bytes / 1048576;
+        if (mb >= 1024) return `${(mb / 1024).toFixed(1)}G`;
+        return `${Math.round(mb)}M`;
+    }
+
+    function formatCount(value) {
+        if (!Number.isFinite(value) || value <= 0) return '0';
+        if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+        if (value >= 1000) return `${Math.round(value / 1000)}k`;
+        return String(Math.round(value));
+    }
+
+    function countVisibleFaces() {
+        let faces = 0;
+        for (const object of [mesh, pointsMesh, backfillMesh, fillBMesh]) {
+            if (!object || !object.visible || !object.geometry) continue;
+            const geometry = object.geometry;
+            if (geometry.index) faces += geometry.index.count / 3;
+            else {
+                const pos = geometry.getAttribute('position');
+                if (pos) faces += pos.count / 3;
+            }
+        }
+        return faces;
+    }
+
+    function getLoadText() {
+        if (reductionRunPromise) return 'reduce';
+        if (reductionTimer != null) return 'queued';
+        if (reduceWorkerDisabled) return 'full';
+        if (!reducePolygons || isPointsMode) return 'full';
+        return 'idle';
     }
 
     function isTypingTarget() {
@@ -229,6 +320,7 @@ const Viewer = (function () {
         currentIntrinsics = intrinsics || null;
         currentViewerOptions = options;
         createMesh(!!options.preserveCamera);
+        updatePerfHud(performance.now(), true);
     }
 
     function disposeGeometryAndMaterial(object) {

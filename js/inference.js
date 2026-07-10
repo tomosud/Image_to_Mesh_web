@@ -30,9 +30,14 @@ const Inference = (function () {
     let hasNumTokensInput = false;
     let loadedModelKey = null;
     let activeProvider = null;
+    let runInProgress = false;
 
     function setModel(key) {
         if (!MODELS[key]) return;
+        if (runInProgress) {
+            console.warn('Cannot change the model while inference is running.');
+            return;
+        }
         if (key !== currentModelKey) {
             // モデル変更時は既存セッションを破棄して再ロードを促す
             if (session) { try { session.release && session.release(); } catch (e) { } }
@@ -201,42 +206,50 @@ const Inference = (function () {
     // 戻り値: { points: Float32[inH*inW*3], normal, mask: Float32[inH*inW],
     //          metricScale: number, width: inW, height: inH }
     async function run(imageData, numTokens) {
-        if (!session) throw new Error('The model is not loaded');
-        numTokens = numTokens || 1800;
-        const { inW, inH } = computeInputSize(imageData.width, imageData.height, numTokens);
-
-        const inputData = preprocess(imageData, inW, inH);
-        const imageTensor = new ort.Tensor('float32', inputData, [1, 3, inH, inW]);
-
-        const feeds = {};
-        feeds[session.inputNames[0]] = imageTensor; // 'image'
-        if (hasNumTokensInput) {
-            feeds['num_tokens'] = new ort.Tensor('int64', BigInt64Array.from([BigInt(numTokens)]), []);
+        if (runInProgress) {
+            throw new Error('Inference is already running. Please wait for the current run to finish.');
         }
+        if (!session) throw new Error('The model is not loaded');
+        runInProgress = true;
+        try {
+            numTokens = numTokens || 1800;
+            const { inW, inH } = computeInputSize(imageData.width, imageData.height, numTokens);
 
-        const results = await session.run(feeds);
+            const inputData = preprocess(imageData, inW, inH);
+            const imageTensor = new ort.Tensor('float32', inputData, [1, 3, inH, inW]);
 
-        const find = (re, fallbackIdx) => {
-            let k = session.outputNames.find(n => re.test(n));
-            if (!k && fallbackIdx >= 0) k = session.outputNames[fallbackIdx];
-            return k ? results[k] : null;
-        };
+            const feeds = {};
+            feeds[session.inputNames[0]] = imageTensor; // 'image'
+            if (hasNumTokensInput) {
+                feeds['num_tokens'] = new ort.Tensor('int64', BigInt64Array.from([BigInt(numTokens)]), []);
+            }
 
-        const pointsT = find(/point/i, 0);
-        const normalT = find(/normal/i, -1);
-        const maskT = find(/mask/i, 2);
-        const scaleT = find(/scale/i, 3);
+            const results = await session.run(feeds);
 
-        const toF32 = (t) => t ? (t.data instanceof Float32Array ? t.data : Float32Array.from(t.data)) : null;
+            const find = (re, fallbackIdx) => {
+                let k = session.outputNames.find(n => re.test(n));
+                if (!k && fallbackIdx >= 0) k = session.outputNames[fallbackIdx];
+                return k ? results[k] : null;
+            };
 
-        return {
-            points: toF32(pointsT),
-            normal: toF32(normalT),
-            mask: toF32(maskT),
-            metricScale: scaleT ? Number(scaleT.data[0]) : 1.0,
-            width: inW,
-            height: inH
-        };
+            const pointsT = find(/point/i, 0);
+            const normalT = find(/normal/i, -1);
+            const maskT = find(/mask/i, 2);
+            const scaleT = find(/scale/i, 3);
+
+            const toF32 = (t) => t ? (t.data instanceof Float32Array ? t.data : Float32Array.from(t.data)) : null;
+
+            return {
+                points: toF32(pointsT),
+                normal: toF32(normalT),
+                mask: toF32(maskT),
+                metricScale: scaleT ? Number(scaleT.data[0]) : 1.0,
+                width: inW,
+                height: inH
+            };
+        } finally {
+            runInProgress = false;
+        }
     }
 
     function getActiveProvider() {

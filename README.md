@@ -15,10 +15,11 @@ https://github.com/user-attachments/assets/9ee06a21-c0db-4ef7-a144-4e5478724f1f
 - Single-image depth and 3D geometry estimation with MoGe-2
 - ViT-S, ViT-B, and ViT-L model choices
 - WebGPU inference with automatic WASM fallback
-- RGB-guided high-resolution depth upsampling, capped at 2048 px on the long edge
+- Processing images and RGB-guided high-resolution depth are capped at 2048 px on the long edge
 - Textured mesh, point-cloud, wireframe, and unlit display modes
 - Optional display-side polygon reduction using meshoptimizer in a Web Worker
 - Progress HUD for inference, depth post-processing, mesh generation, backfill, and polygon reduction
+- Compact performance HUD with FPS, JS heap, draw load, and processing grid size
 - Estimated source-camera view
 - Three-point horizontal-plane direction adjustment
 - Adjustable masking and depth-edge cleanup
@@ -61,6 +62,8 @@ The same module-worker behavior is why local use must go through `run.bat` or an
 5. Use the download buttons to export geometry or maps.
 
 The first run is slower because the selected model must be downloaded. Model files are stored in the browser cache for later sessions.
+
+Images larger than `2048` px on the long edge are downsampled in the browser before inference, geometry, textures, and backfill processing. The **Original** download still returns the original input file.
 
 To process a different image, click **Another Image**. The page reloads to release ONNX, WebGPU, mesh, and image memory. The selected model and cached model file are retained.
 
@@ -114,7 +117,7 @@ Controls the internal inference resolution.
 Upsamples the metric depth after MoGe-2 inference and before geometry, edge snapping, world-position generation, backfill, and exports.
 
 - Target resolution follows the input image aspect ratio
-- Long edge is capped at `2048` px
+- The processing image and high-resolution depth long edge are capped at `2048` px
 - WebGPU applies an RGB-guided joint bilateral filter
 - If WebGPU is unavailable, the status line clearly reports the fallback and the tool uses the internal initial resize mode
 - Depth stays as float32 meters during processing
@@ -150,7 +153,7 @@ Maximum number of EdgeSnap propagation passes from stable depth areas into marke
 
 MoGe-2 marks sky, transparent/reflective surfaces, and uncertain regions as invalid. This selector decides what happens to those pixels. Changes are applied immediately without rerunning inference.
 
-- **Sky Backdrop** (default): keeps the masked pixels and places them on a flat plane far behind the scene, at `max(2 × deepest valid depth, 100 m)`. The original image colors are used, so the sky becomes a natural matte-painting backdrop. The boundary against foreground geometry is handled by the normal edge snapping and splitting.
+- **Sky Backdrop** (default): keeps the masked pixels and places them on a flat plane far behind the scene, at `max(2 × deepest valid depth, 100 m)`. The processing image colors are used, so the sky becomes a natural matte-painting backdrop. The boundary against foreground geometry is handled by the normal edge snapping and splitting.
 - **Apply Mask OFF**: keeps the model's raw predicted depth for masked pixels. The sky may appear at an arbitrary distance (the model has no supervision there).
 - **Apply Mask ON**: removes the masked regions entirely, leaving holes.
 
@@ -160,7 +163,7 @@ Invalid or non-positive depth values still cannot form geometry in the OFF mode.
 
 Backfill creates a second background layer behind depth-edge silhouettes.
 
-- **Fill Margin** is measured as a percentage of the original image long edge
+- **Fill Margin** is measured as a percentage of the processing image long edge
 - Range: `0.5%` to `50%`
 - Default: `25%`
 - The UI also shows the equivalent processing-grid pixel distance in parentheses after an image is loaded
@@ -201,7 +204,7 @@ Reduction needs an HTTP(S) origin because it uses `js/reduce_worker.js` as a mod
 - **Points Only**: switch between triangle mesh and point cloud
 - **Point Size**: set point size in screen pixels
 - **Unlit**: show image colors without scene lighting
-- **No Color**: hide the source-image color
+- **No Color**: hide the processing-image color
 - **Wireframe**: show mesh triangle edges
 - **Reduce Polygons**: asynchronously simplify the displayed mesh and exported OBJ/GLB geometry
 - **Reset View**: restore the estimated source-camera view
@@ -210,6 +213,8 @@ Reduction needs an HTTP(S) origin because it uses `js/reduce_worker.js` as a mod
 - **Adjust Horizontal Grid**: set the aligned export plane direction from three points while keeping the initial orbit pivot
 - **Show Capture Frame**: preview the square PNG export region
 - **UI OFF / UI ON**: hide or restore interface panels
+
+The compact performance HUD shows FPS, JavaScript heap memory when the browser exposes it, rendered triangles / draw calls, processing grid size, and polygon-reduction state.
 
 ## Downloads
 
@@ -222,7 +227,7 @@ Reduction needs an HTTP(S) origin because it uses `js/reduce_worker.js` as a mod
 | Aligned WorldPos (EXR) | 32-bit FLOAT positions with `R=X`, `G=Y`, and `B=Z` |
 | Backfill WorldPos (EXR) | 32-bit FLOAT positions for the generated occlusion backfill layer |
 | Backfill Texture (PNG) | Texture generated for the occlusion backfill layer |
-| OBJ + Textures (ZIP) | ZIP containing OBJ, MTL, source-image texture PNG, tangent-space normal map PNG, and Backfill texture PNG when Backfill exists |
+| OBJ + Textures (ZIP) | ZIP containing OBJ, MTL, processing-image texture PNG, tangent-space normal map PNG, and Backfill texture PNG when Backfill exists |
 | Scene GLB | Textured mesh with estimated source and current viewer cameras |
 | PNG (2048) | Current view rendered to a transparent 2048×2048 PNG |
 
@@ -237,10 +242,10 @@ Scene GLB contains:
 - `AlignedMesh`
 - `EstimatedSourceCamera`
 - `CurrentViewCamera`
-- Source-image texture and tangent-space normal map
+- Processing-image texture and tangent-space normal map
 - GLB materials use the source/backfill color textures as emissive maps, with black base color and metallic set to `1.0`
 
-OBJ ZIP uses the same source-image texture and tangent-space normal map as the GLB. When Backfill exists, the OBJ also contains a `BackfillMesh` object and the ZIP includes its Backfill texture PNG. When Fill B exists, OBJ and GLB also include a `FillBMesh` object with its generated texture.
+OBJ ZIP uses the same processing-image texture and tangent-space normal map as the GLB. When Backfill exists, the OBJ also contains a `BackfillMesh` object and the ZIP includes its Backfill texture PNG. When Fill B exists, OBJ and GLB also include a `FillBMesh` object with its generated texture.
 
 If **Reduce Polygons** is enabled and reduction has completed, OBJ ZIP and Scene GLB export the reduced displayed geometry. Export waits for a pending reduction pass before packaging the files.
 
@@ -259,7 +264,7 @@ Depth EXR remains in the original camera-depth coordinate system.
 
 - Reduce Quality (`num_tokens`).
 - Select a smaller model.
-- Reduce the source-image resolution.
+- Use a smaller source file if the browser still runs out of memory.
 - Click **Another Image** between images so the page can release GPU and inference memory.
 
 ### Long surfaces stretch across depth boundaries

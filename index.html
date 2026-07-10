@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image to Mesh — World Position Viewer</title>
     <link rel="icon" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3e%3cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3e%3c/svg%3e">
-    <link rel="stylesheet" href="css/style.css?v=20260709-3">
+    <link rel="stylesheet" href="css/style.css?v=20260710-3">
 </head>
 <body>
     <div id="container">
@@ -14,6 +14,13 @@
         <div id="progressHud" class="hidden" aria-live="polite">
             <div id="progressTitle">Processing...</div>
             <div id="progressDetail"></div>
+        </div>
+        <div id="perfHud" class="hidden" aria-live="off">
+            <div><span>FPS</span><strong id="perfFps">--</strong></div>
+            <div><span>Mem</span><strong id="perfMemory">--</strong></div>
+            <div><span>Draw</span><strong id="perfDraw">--</strong></div>
+            <div><span>Grid</span><strong id="perfGrid">--</strong></div>
+            <div><span>Load</span><strong id="perfLoad">--</strong></div>
         </div>
         <a id="repoLink" href="https://github.com/tomosud/Image_to_Mesh_web" target="_blank" rel="noopener noreferrer">tomosud/Image_to_Mesh_web</a>
         <div id="captureFrame"></div>
@@ -193,7 +200,7 @@
                     </div>
                 </div>
                 <div class="control-group">
-                    <label>Fill Margin (% long edge): <span id="fillMarginValue">25.0%</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="How far the background layer extends behind foreground silhouettes, measured as a percentage of the original image long edge. Larger values tolerate more camera movement but extrapolate more." aria-label="Fill Margin help">?</span></label>
+                    <label>Fill Margin (% long edge): <span id="fillMarginValue">25.0%</span> <span class="help-tip" tabindex="0" role="note" data-tooltip="How far the background layer extends behind foreground silhouettes, measured as a percentage of the processing image long edge. Larger values tolerate more camera movement but extrapolate more." aria-label="Fill Margin help">?</span></label>
                     <div class="slider-container">
                         <input type="range" id="fillMargin" min="0.5" max="50" step="0.5" value="25">
                     </div>
@@ -301,10 +308,10 @@
     <script src="js/normalmap.js?v=20260620-13"></script>
     <script src="js/backfill.js?v=20260709-1"></script>
     <script src="js/fillb.js?v=20260708-2"></script>
-    <script src="js/viewer.js?v=20260709-8"></script>
-    <script src="js/inference.js?v=20260620-13"></script>
+    <script src="js/viewer.js?v=20260710-2"></script>
+    <script src="js/inference.js?v=20260710-1"></script>
     <script src="js/download.js?v=20260705-1"></script>
-    <script src="js/main.js?v=20260709-4"></script>
+    <script src="js/main.js?v=20260710-1"></script>
     <div id="orbit-cursor-tooltip">Click to set orbit center</div>
 </body>
 </html>

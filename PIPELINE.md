@@ -9,9 +9,15 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 
 ---
 
+## 入力画像の処理用リサイズ（js/main.js `readImageFile`）
+
+- ブラウザでデコードした入力画像は、推論より前に長辺最大 `2048px` へ縮小する
+- 以後の推論、DepthUpsampler、テクスチャ補正、backfill、表示、OBJ/GLB 用テクスチャはこの処理用画像を使う
+- `Original` ダウンロード用の `File` は変更せず、元ファイルのまま保持する
+
 ## 0. 推論（js/inference.js）
 
-- 入力: 元画像
+- 入力: 処理用画像
 - MoGe-2 が **point map（各画素の3D位置の素）/ 法線 / mask（空・不確実領域=0）/
   metric scale** を出力する
 - 解像度は `num_tokens` と画像アスペクト比から決まるモデル解像度
@@ -27,8 +33,8 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 
 ## 2. DepthUpsampler = depth 高解像度化（js/depth_upsample.js）
 
-- 入力: MoGe 後処理後の metric depth / mask / points / normal / intrinsics と元画像
-- 出力解像度: 入力画像のアスペクト比に合わせ、長辺最大 `2048px`
+- 入力: MoGe 後処理後の metric depth / mask / points / normal / intrinsics と処理用画像
+- 出力解像度: 処理用画像のアスペクト比に合わせ、長辺最大 `2048px`
 - まず `Initial Depth Resize` で低解像度 depth を high-res depth へ拡大する
   - `Bilinear`: なめらかだが境界も丸まりやすい
   - `Nearest`: 段差を硬く残しやすい
@@ -60,7 +66,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 
 ## 5. SkyMaskColorFill = 空mask内周の色補正（js/skymask_colorfill.js、Sky モードのみ）
 
-- 入力: Sky Backdrop 前の mask と元画像
+- 入力: Sky Backdrop 前の mask と処理用画像
 - 対象: mask 領域の内周 `4px` だけ
   - mask を `4px` 収縮する
   - `元mask - 収縮後mask` のリングだけを書き換える
@@ -69,7 +75,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 - 内周4pxより奥の空色も書き換えない
 - 目的: mask境界に混入した建物・黒・手前色を、空側の色で置き換えて Sky Backdrop / Backfill の色種汚染を減らす
 - 変更するもの: **表示/backfill 用テクスチャ画像の一部の色だけ**
-- 変更しないもの: 元画像、depth、points、mask、UV、メッシュ
+- 変更しないもの: 処理用画像、depth、points、mask、UV、メッシュ
 
 ## 6. EdgeSnap = 深度の中間値の除去（js/edgesnap.js）
 
@@ -92,15 +98,15 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 ## 7. ColorPatch = テクスチャの混色帯の塗り直し（js/colorpatch.js）
 
 - 写真のエッジ部分のテクスチャには手前と奥の**混ざった色**（ボケ・アンチエイリアス）が写っている
-- これをエッジ帯だけ**元画像解像度で**塗り直す
-- 入力画像は、Sky モードでは手順5の SkyMaskColorFill 済み画像、通常は元画像
+- これをエッジ帯だけ**処理用画像解像度で**塗り直す
+- 入力画像は、Sky モードでは手順5の SkyMaskColorFill 済み画像、通常は処理用画像
 - 帯の各画素は「自分と同じ depth 側（差10%以内）の帯の外の画素」から色をもらう
   - 手前の帯は手前の色だけ
   - 奥の帯は奥の色だけ
   - 色がシームを越えない
 - 同じ側に届かない画素は元の色のまま残す
 - 変更するもの: **表示/backfill 用テクスチャ画像のエッジ帯の色だけ**
-- 変更しないもの: 元画像、UV、depth、points、メッシュ
+- 変更しないもの: 処理用画像、UV、depth、points、メッシュ
 
 ## 8. World Position 化（js/worldpos.js）
 
@@ -112,7 +118,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 
 - world position のグリッドに 1画素=1頂点 のメッシュを張る
 - geometry は最大 `2048×2048` に制限される
-- UV は全頂点「元画像のその画素の位置」のまま
+- UV は全頂点「処理用画像のその画素の位置」のまま
   - EdgeSnap の吸着元へ UV を丸ごと差し替える方式は、モデル解像度粒度のブロック/スジが出たため廃止
   - 色の問題は手順5/7のテクスチャ側補正で扱う
 - depth 段差が `0.10`（固定）を超えるセルは面を削除せず near / far の2枚に分割する
@@ -223,7 +229,7 @@ backfill を作る」までに何が行われているかを、段階ごとに**
 固定しきい値 / UI既定値:
 
 - mesh seam split: relative depth jump `0.10`
-- Fill Margin UI: original image long edge percentage, default `25%`; converted to processing-grid `marginPx` before `Backfill.generate`
+- Fill Margin UI: processing image long edge percentage, default `25%`; converted to processing-grid `marginPx` before `Backfill.generate`
 - Backfill Parallax Cut: scene median disparity multiplier, default `0.50`
 - Backfill Front Clamp: max generated disparity multiplier, default `1.00`
 - Backfill Far Clamp: max generated depth multiplier, default `4.0`

@@ -1,6 +1,6 @@
 # 実装状況
 
-最終更新: 2026-07-09
+最終更新: 2026-07-10
 
 ## 現在の構成
 
@@ -12,9 +12,10 @@
 
 - MoGe-2 ViT-S / ViT-B / ViT-L の WebGPU 推論と WASM フォールバック
 - JPG / PNG / WebP / AVIF / GIF / BMP などブラウザがデコードできる画像入力
+- 入力画像は処理前に長辺最大 `2048px` へ縮小し、元ファイルは Original ダウンロード用に保持
 - `num_tokens`、モデル選択、Scale、Sky / Masked Area、High-Res Depth、EdgeSnap、Backfill の UI
 - MoGe point map から focal / shift / intrinsics / metric depth / camera-space points を復元
-- 入力画像比率・長辺最大 2048px の depth 高解像度化
+- 処理用画像比率・長辺最大 2048px の depth 高解像度化
 - WebGPU RGB-guided Joint Bilateral Filter と、WebGPU 不可時の初期拡大 fallback
 - Sky Backdrop による mask 領域の最奥平面化
 - SkyMaskColorFill による空 mask 内周4pxの色補正
@@ -24,6 +25,7 @@
 - Adjust Horizontal Grid は aligned export 用の地平方向だけを設定し、scene origin / grid 表示位置 / orbit pivot は初期ターゲットに固定する
 - Set Orbit Center / `F` でクリックした表示面を一時的な回転中心にできる。Reset View で推定ソースカメラ位置・上方向・初期ターゲットへ戻す
 - カメラ操作は Maya 風の `Alt+左=orbit` / `Alt+中=pan` / `Alt+右=dolly`。`W/A/S/D` でビュー基準の平行移動、`Shift/Ctrl` で上下平行移動。dolly は低速化
+- 右上の小型 Performance HUD で FPS、JS heap、描画負荷、処理グリッド、リダクション状態を表示
 - カメラ情報が変わらない後処理パラメータ変更では、現在のビューを維持したままメッシュだけ更新
 - depth 段差セルの near/far 2枚プレート分割と各1セル延長
 - 奥側エッジ由来の Backfill 第2レイヤー
@@ -41,7 +43,7 @@
 - Snap Width: `8`
 - Small Component Faces: `64`
 - Sky / Masked Area: Sky Backdrop
-- Fill Margin: `25%` of original image long edge
+- Fill Margin: `25%` of processing image long edge
 - Backfill Parallax Cut: `0.50x` scene median disparity
 - Backfill Front Clamp: `1.00x` assigned edge disparity
 - Backfill Far Clamp: `4.0x` assigned edge depth

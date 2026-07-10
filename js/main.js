@@ -19,6 +19,7 @@
     let lastNumTokens = 1800;
     let currentModelKey = 'vitb';
     const MODEL_STORAGE_KEY = 'image-to-mesh:model';
+    const PROCESS_IMAGE_MAX_LONG_EDGE = 2048;
     const SUPPORTED_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'gif', 'bmp']);
 
     const $ = (id) => document.getElementById(id);
@@ -37,6 +38,16 @@
         const type = String(file.type || '').toLowerCase();
         if (type.startsWith('image/')) return true;
         return SUPPORTED_IMAGE_EXTENSIONS.has(getFileExtension(file.name));
+    }
+
+    function fitWithinMaxLongEdge(width, height, maxLongEdge) {
+        const longEdge = Math.max(width, height);
+        const scale = longEdge > maxLongEdge ? maxLongEdge / longEdge : 1;
+        return {
+            width: Math.max(1, Math.round(width * scale)),
+            height: Math.max(1, Math.round(height * scale)),
+            scale
+        };
     }
 
     function showLoading(show, text, ratio) {
@@ -114,32 +125,41 @@
     // ---- 画像読み込み ----
     function readImageFile(file) {
         return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    try {
-                        const width = img.naturalWidth || img.width;
-                        const height = img.naturalHeight || img.height;
-                        if (!width || !height) {
-                            reject(new Error('The selected image has no readable pixel dimensions.'));
-                            return;
-                        }
-                        const canvas = document.createElement('canvas');
-                        canvas.width = width;
-                        canvas.height = height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0);
-                        resolve(ctx.getImageData(0, 0, width, height));
-                    } catch (err) {
-                        reject(err);
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            const cleanup = () => URL.revokeObjectURL(url);
+            img.onload = () => {
+                cleanup();
+                try {
+                    const width = img.naturalWidth || img.width;
+                    const height = img.naturalHeight || img.height;
+                    if (!width || !height) {
+                        reject(new Error('The selected image has no readable pixel dimensions.'));
+                        return;
                     }
-                };
-                img.onerror = () => reject(new Error('The selected image format could not be decoded by this browser.'));
-                img.src = e.target.result;
+                    const target = fitWithinMaxLongEdge(width, height, PROCESS_IMAGE_MAX_LONG_EDGE);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = target.width;
+                    canvas.height = target.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, target.width, target.height);
+                    if (target.scale < 1) {
+                        console.info('[Image] resized input for processing', {
+                            source: `${width}x${height}`,
+                            processing: `${target.width}x${target.height}`,
+                            maxLongEdge: PROCESS_IMAGE_MAX_LONG_EDGE
+                        });
+                    }
+                    resolve(ctx.getImageData(0, 0, target.width, target.height));
+                } catch (err) {
+                    reject(err);
+                }
             };
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
+            img.onerror = () => {
+                cleanup();
+                reject(new Error('The selected image format could not be decoded by this browser.'));
+            };
+            img.src = url;
         });
     }
 
@@ -633,6 +653,11 @@
 
         // 推論パラメータ
         $('modelSelect').addEventListener('change', (e) => {
+            if (isBusy()) {
+                e.target.value = currentModelKey;
+                reportBusy();
+                return;
+            }
             currentModelKey = e.target.value;
             Inference.setModel(currentModelKey);
             modelReady = false; // 次回処理時に再ロード
