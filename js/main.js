@@ -62,6 +62,32 @@
         return ratio != null ? `${Math.round(ratio * 100)}%` : '';
     }
 
+    // 処理中に薄くぼかした入力画像を背景に表示する。
+    let processingPreviewUrl = null;
+    function showProcessingPreview(file) {
+        const el = $('processingPreview');
+        if (!el) return;
+        if (processingPreviewUrl) {
+            URL.revokeObjectURL(processingPreviewUrl);
+            processingPreviewUrl = null;
+        }
+        if (file) {
+            processingPreviewUrl = URL.createObjectURL(file);
+            el.src = processingPreviewUrl;
+            el.classList.add('visible');
+        }
+    }
+
+    function hideProcessingPreview() {
+        const el = $('processingPreview');
+        if (!el) return;
+        el.classList.remove('visible');
+        if (processingPreviewUrl) {
+            URL.revokeObjectURL(processingPreviewUrl);
+            processingPreviewUrl = null;
+        }
+        el.removeAttribute('src');
+    }
     function setProgress(title, detail) {
         const hud = $('progressHud');
         if (!hud) return;
@@ -493,6 +519,7 @@
         setDownloadEnabled(false);
         currentFile = file;
         currentBaseName = getImageBaseName(file);
+        showProcessingPreview(file);
 
         try {
             showLoading(true, 'Loading image...');
@@ -546,6 +573,7 @@
             alert('Processing failed:\n' + (e && e.message ? e.message : e));
         } finally {
             processingImage = false;
+            hideProcessingPreview();
         }
     }
 
@@ -571,7 +599,62 @@
             if (e.target === dropZone) return;
             handleFiles(e.dataTransfer.files);
         });
+
+        // クリップボードからの貼り付け受付。確認ダイアログを経てから処理する。
+        window.addEventListener('paste', (e) => {
+            const items = e.clipboardData && e.clipboardData.items;
+            if (!items) return;
+            let imageFile = null;
+            for (const item of items) {
+                if (item.kind === 'file' && String(item.type || '').toLowerCase().startsWith('image/')) {
+                    imageFile = item.getAsFile();
+                    break;
+                }
+            }
+            if (!imageFile) return;
+            e.preventDefault();
+            confirmPastedImage(imageFile);
+        });
     }
+
+    // ---- 貼り付け画像の確認ダイアログ ----
+    function confirmPastedImage(file) {
+        if (isBusy()) {
+            reportBusy();
+            return;
+        }
+        const overlay = $('pasteConfirm');
+        const thumb = $('pasteConfirmThumb');
+        const okBtn = $('pasteConfirmOk');
+        const cancelBtn = $('pasteConfirmCancel');
+        const url = URL.createObjectURL(file);
+
+        const cleanup = () => {
+            overlay.classList.remove('visible');
+            URL.revokeObjectURL(url);
+            thumb.src = '';
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            overlay.removeEventListener('click', onOverlayClick);
+            document.removeEventListener('keydown', onKey);
+        };
+        const onOk = () => { cleanup(); processImage(file); };
+        const onCancel = () => cleanup();
+        const onOverlayClick = (e) => { if (e.target === overlay) onCancel(); };
+        const onKey = (e) => {
+            if (e.key === 'Escape') onCancel();
+            else if (e.key === 'Enter') onOk();
+        };
+
+        thumb.src = url;
+        overlay.classList.add('visible');
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        overlay.addEventListener('click', onOverlayClick);
+        document.addEventListener('keydown', onKey);
+        okBtn.focus();
+    }
+
 
     function handleFiles(files) {
         if (isBusy()) {

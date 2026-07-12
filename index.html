@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image to Mesh — World Position Viewer</title>
     <link rel="icon" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3e%3cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3e%3c/svg%3e">
-    <link rel="stylesheet" href="css/style.css?v=20260709-3">
+    <link rel="stylesheet" href="css/style.css?v=20260712-2">
 </head>
 <body>
     <div id="container">
         <canvas id="canvas"></canvas>
+        <img id="processingPreview" alt="">
         <button id="toggleUI" type="button" aria-pressed="false">UI OFF</button>
         <div id="progressHud" class="hidden" aria-live="polite">
             <div id="progressTitle">Processing...</div>
@@ -19,11 +20,19 @@
         <div id="captureFrame"></div>
 
         <div id="dropZone">
-            <div id="dropText">Drop an Image</div>
+            <div id="dropText">Drop an Image or Paste from Clipboard</div>
             <div id="dropSubtext">
-                Drop a JPG, PNG, WebP, AVIF, GIF, or BMP image to estimate depth with MoGe-2<br>
-                and display it as a world-position mesh.<br>
-                <span style="opacity:.8">Click here to select a file</span>
+                <p class="drop-lang">
+                    Drop an image or paste from the clipboard (Ctrl+V).<br>
+                    <span class="drop-formats">JPG / PNG / WebP / AVIF / GIF / BMP</span><br>
+                    Estimates depth with MoGe-2 and shows a world-position mesh.
+                </p>
+                <p class="drop-lang">
+                    画像をドロップ、またはクリップボードから貼り付け（Ctrl+V）。<br>
+                    <span class="drop-formats">JPG / PNG / WebP / AVIF / GIF / BMP</span><br>
+                    MoGe-2 で深度を推定し、ワールド座標メッシュとして表示します。
+                </p>
+                <p class="drop-hint">Click here to select a file / クリックしてファイルを選択</p>
             </div>
         </div>
 
@@ -263,6 +272,17 @@
             </div>
         </div>
 
+        <div id="pasteConfirm" role="dialog" aria-modal="true" aria-labelledby="pasteConfirmTitle">
+            <div class="paste-confirm-box">
+                <div id="pasteConfirmTitle" class="paste-confirm-title">Use this pasted image?</div>
+                <img id="pasteConfirmThumb" class="paste-confirm-thumb" alt="Pasted image preview">
+                <div class="paste-confirm-actions">
+                    <button id="pasteConfirmOk" type="button">OK</button>
+                    <button id="pasteConfirmCancel" type="button">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <div id="info">
             <div>Left drag: Rotate</div>
             <div>Wheel: Zoom</div>
@@ -304,7 +324,7 @@
     <script src="js/viewer.js?v=20260709-8"></script>
     <script src="js/inference.js?v=20260620-13"></script>
     <script src="js/download.js?v=20260705-1"></script>
-    <script src="js/main.js?v=20260709-4"></script>
+    <script src="js/main.js?v=20260712-2"></script>
     <div id="orbit-cursor-tooltip">Click to set orbit center</div>
 </body>
 </html>
