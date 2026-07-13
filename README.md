@@ -7,8 +7,8 @@ Image to Mesh Web converts a single browser-supported image into an interactive 
 
 
 
-https://github.com/user-attachments/assets/14f07f83-7de4-45c0-b4d3-9f3e93a59319
 
+https://github.com/user-attachments/assets/2bca6cc5-9767-4a25-8ad2-66199f2c8c7b
 
 
 
